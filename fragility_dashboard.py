@@ -190,21 +190,64 @@ def stress_test(d):
     return cur, rows
 
 # ---------- HTML ----------
-def trend_chart(comp, w=1000, h=150):
-    s=comp.dropna().iloc[-750:]
+# NBER 美國景氣循環衰退期(peak→trough);資料起於~2013,故實務上僅 COVID(2020)落在範圍內
+NBER=[["1990-07-01","1991-03-31"],["2001-03-01","2001-11-30"],
+      ["2007-12-01","2009-06-30"],["2020-02-01","2020-04-30"]]
+
+def trend_chart(comp):
+    s=comp.dropna()
     if len(s)<5: return "<div style='color:var(--muted);padding:20px'>歷史資料累積中…</div>"
-    xs=[i/(len(s)-1)*w for i in range(len(s))]
-    ys=[h-(v/100)*h for v in s.values]
-    path=" ".join(f"{'M' if i==0 else 'L'}{xs[i]:.1f} {ys[i]:.1f}" for i in range(len(s)))
-    bands=(f'<rect x="0" y="0" width="{w}" height="{h*0.25:.0f}" fill="var(--red)" opacity="0.08"/>'
-           f'<rect x="0" y="{h*0.25:.0f}" width="{w}" height="{h*0.20:.0f}" fill="var(--warn)" opacity="0.10"/>')
-    labels="".join(f'<text x="2" y="{h-(v/100)*h+3:.0f}" font-size="9" fill="var(--muted)">{v}</text>' for v in (75,55))
-    dates=[str(d.date()) for d in s.index]
-    return (f'<svg viewBox="0 0 {w} {h}" width="100%" height="{h}" preserveAspectRatio="none" style="display:block">'
-            f'{bands}<path d="{path}" fill="none" stroke="var(--series-1)" stroke-width="1.6"/>'
-            f'<circle cx="{xs[-1]:.1f}" cy="{ys[-1]:.1f}" r="3" fill="var(--series-1)"/>{labels}</svg>'
-            f'<div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px">'
-            f'<span>{dates[0]}</span><span>脆弱度歷史(回溯,全樣本百分位;紅區≥75 橙區≥55)</span><span>{dates[-1]}</span></div>')
+    data=[[str(d.date()), round(float(v),1)] for d,v in s.items()]
+    js=TREND_JS.replace("__DATA__",json.dumps(data)).replace("__REC__",json.dumps(NBER))
+    return ('<div id="tc"><svg id="tcsvg"></svg><div id="tctip"></div></div>'
+            '<div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:4px">'
+            '<span>滑鼠移過可看當日數值</span><span>灰帶=NBER 美國衰退期 · 紅區≥75 橙區≥55(全樣本百分位)</span></div>'
+            f'<script>{js}</script>')
+
+TREND_JS=r"""(function(){
+ const DATA=__DATA__, REC=__REC__;
+ const svg=document.getElementById('tcsvg'), box=document.getElementById('tc'), tip=document.getElementById('tctip');
+ const H=180, padL=30, padR=12, padT=12, padB=22;
+ const TS=DATA.map(d=>Date.parse(d[0])); const n=DATA.length;
+ let W=800, plotW=0, plotH=0;
+ const X=i=>padL+(n<2?0:i/(n-1)*plotW), Y=v=>padT+(1-v/100)*plotH;
+ function idxForTs(t){let lo=0,hi=n-1;if(t<=TS[0])return 0;if(t>=TS[hi])return hi;
+   while(lo<hi){const m=(lo+hi)>>1;if(TS[m]<t)lo=m+1;else hi=m;}
+   return (lo>0&&Math.abs(TS[lo-1]-t)<Math.abs(TS[lo]-t))?lo-1:lo;}
+ function render(){
+   W=box.clientWidth||800; plotW=W-padL-padR; plotH=H-padT-padB;
+   svg.setAttribute('width',W); svg.setAttribute('height',H); svg.setAttribute('viewBox','0 0 '+W+' '+H);
+   let g='';
+   g+='<rect x="'+padL+'" y="'+Y(100)+'" width="'+plotW+'" height="'+(Y(75)-Y(100))+'" fill="var(--red)" opacity="0.08"/>';
+   g+='<rect x="'+padL+'" y="'+Y(75)+'" width="'+plotW+'" height="'+(Y(55)-Y(75))+'" fill="var(--warn)" opacity="0.10"/>';
+   REC.forEach(r=>{const s=Date.parse(r[0]),e=Date.parse(r[1]); if(e<TS[0]||s>TS[n-1])return;
+     const xs=X(idxForTs(Math.max(s,TS[0]))), xe=X(idxForTs(Math.min(e,TS[n-1])));
+     g+='<rect x="'+xs+'" y="'+padT+'" width="'+Math.max(2,xe-xs)+'" height="'+plotH+'" fill="var(--muted)" opacity="0.30"/>';
+     g+='<text x="'+((xs+xe)/2)+'" y="'+(padT+10)+'" font-size="9" fill="var(--ts)" text-anchor="middle">NBER衰退</text>';});
+   [75,55].forEach(v=>{g+='<line x1="'+padL+'" y1="'+Y(v)+'" x2="'+(W-padR)+'" y2="'+Y(v)+'" stroke="var(--border)" stroke-dasharray="3 3"/>'
+     +'<text x="'+(padL-4)+'" y="'+(Y(v)+3)+'" font-size="9" fill="var(--muted)" text-anchor="end">'+v+'</text>';});
+   let p=''; for(let i=0;i<n;i++)p+=(i?'L':'M')+X(i).toFixed(1)+' '+Y(DATA[i][1]).toFixed(1)+' ';
+   g+='<path d="'+p+'" fill="none" stroke="var(--series-1)" stroke-width="1.5"/>';
+   g+='<circle cx="'+X(n-1)+'" cy="'+Y(DATA[n-1][1])+'" r="3" fill="var(--series-1)"/>';
+   g+='<line id="tcx" y1="'+padT+'" y2="'+(padT+plotH)+'" stroke="var(--tp)" opacity="0"/><circle id="tcd" r="3.5" fill="var(--series-1)" opacity="0"/>';
+   // 年份刻度
+   let lastY=null;
+   for(let i=0;i<n;i++){const yr=DATA[i][0].slice(0,4); if(yr!==lastY){lastY=yr;
+     if(+yr%2===0)g+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+yr+'</text>';}}
+   svg.innerHTML=g;
+ }
+ function move(ev){const rect=svg.getBoundingClientRect(); const mx=(ev.touches?ev.touches[0].clientX:ev.clientX)-rect.left;
+   let i=Math.round((mx-padL)/plotW*(n-1)); i=Math.max(0,Math.min(n-1,i));
+   const x=X(i),y=Y(DATA[i][1]); const xl=document.getElementById('tcx'),dot=document.getElementById('tcd');
+   xl.setAttribute('x1',x);xl.setAttribute('x2',x);xl.setAttribute('opacity','0.35');
+   dot.setAttribute('cx',x);dot.setAttribute('cy',y);dot.setAttribute('opacity','1');
+   tip.style.opacity='1'; tip.innerHTML='<b>'+DATA[i][0]+'</b><br>脆弱度 '+DATA[i][1];
+   let tx=x+12; if(tx>W-96)tx=x-96; tip.style.left=Math.max(0,tx)+'px'; tip.style.top='4px';}
+ function leave(){document.getElementById('tcx').setAttribute('opacity','0');document.getElementById('tcd').setAttribute('opacity','0');tip.style.opacity='0';}
+ render(); svg.addEventListener('mousemove',move); svg.addEventListener('mouseleave',leave);
+ svg.addEventListener('touchmove',function(e){move(e);},{passive:true});
+ let rt; window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(render,150);});
+})();"""
 
 def build_html(R, base, comp, stress_cur, stress_rows, asof, comp_hist=None):
     def spark(series, w=150, h=34, danger_high=True):
@@ -267,6 +310,9 @@ h1{font-size:21px;margin:0 0 3px}.sub{color:var(--ts);font-size:12.5px}
 .cn{font-size:10.5px;color:var(--muted);line-height:1.35;margin-top:4px}
 .trend{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px}
 .trend .th{font-size:13px;color:var(--ts);margin-bottom:6px;font-weight:600}
+#tc{position:relative;width:100%}#tcsvg{display:block;width:100%;cursor:crosshair}
+#tctip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
+ padding:5px 8px;font-size:11px;line-height:1.4;opacity:0;transition:opacity .1s;box-shadow:0 2px 8px rgba(0,0,0,.18);white-space:nowrap;z-index:3}
 h2{font-size:15px;margin:26px 0 10px}
 table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
 th,td{padding:9px 12px;font-size:13px;border-bottom:1px solid var(--border);text-align:left}
