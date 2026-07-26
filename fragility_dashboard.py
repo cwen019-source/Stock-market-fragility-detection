@@ -239,8 +239,11 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
   <button id="qbtn" style="font:inherit;background:var(--series-1);color:#fff;border:0;border-radius:8px;padding:7px 14px;cursor:pointer">查詢</button>
   <span id="qmsg" style="font-size:12px;color:var(--muted)"></span></div>
  <div id="scwrap" style="display:none;margin-top:10px"><div id="sctitle" style="font-size:14px;font-weight:650;margin-bottom:4px"></div>
+  <div class="ctrl" id="scranges" style="margin:0 0 6px"><button data-d="244">1年</button><button data-d="732">3年</button><button data-d="1220">5年</button><button data-d="0" class="on">全部</button>
+   <input type="date" id="sd0"><span style="color:var(--muted)">~</span><input type="date" id="sd1"></div>
   <div id="sc" style="position:relative"><svg id="scsvg"></svg><div id="sctip"></div></div>
   <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數刻度,已還原除權息/分割);滑鼠移過看當日收盤</span><span id="scend"></span></div>
+  <div id="scsuit" style="font-size:12.5px;margin-top:8px;padding:8px 11px;background:var(--bg);border:1px solid var(--border);border-radius:9px"></div>
   <div id="scstats" class="scstats"></div>
   <div id="scmnote" style="font-size:10.5px;color:var(--muted);margin-top:4px"></div></div></div>
 <div class="trend"><div class="th"><span>脆弱度歷史趨勢</span>
@@ -248,7 +251,7 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
  <input type="date" id="d0"><span style="color:var(--muted)">~</span><input type="date" id="d1"></span></div>
  <div id="tc"><svg id="tcsvg"></svg><div id="tctip"></div></div>
  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:4px">
- <span>滑鼠移過可看當日數值(各燈號同步)</span><span>紅直帶=10項中≥8項同進紅區 · 灰帶=NBER衰退 · 橫線 75/55</span></div></div>
+ <span>滑鼠移過可看當日數值(各燈號同步)</span><span>紅帶色深=同時進紅區項數 6→10(越深越嚴重) · 灰帶=NBER衰退 · 橫線 75/55</span></div></div>
 <h2 id="indh" style="margin-bottom:6px">產業子分析 — 依對該產業報酬的預測力重排燈號</h2>
 <div id="indbar" class="indbar"></div>
 <div class="indcap" id="indcap"></div>
@@ -268,8 +271,9 @@ APP_JS=r"""
 const D=__APPDATA__, REC=__REC__;
 const N=D.dates.length, TS=D.dates.map(s=>Date.parse(s));
 const REDN=8;   // 高壓叢集門檻:10項中至少這麼多項同進紅區
+const DPOS={};for(let _i=0;_i<N;_i++)DPOS[D.dates[_i]]=_i;   // 日期→脆弱度索引(供個股區間對照)
 const $=id=>document.getElementById(id);
-let a=Math.max(0,N-732), b=N-1, sel=N-1;   // 視窗[a,b], sel=游標選取(全域index)
+let a=Math.max(0,N-732), b=N-1, sel=N-1, pinned=false, pinIdx=null;   // 視窗[a,b], sel=游標/固定index
 const light=s=>s>=75?'red':s>=55?'warn':'ok';
 function fmtVal(v,fmt){if(v==null||isNaN(v))return '–';let s=(+v).toFixed(fmt[1]);if(fmt[0]&&v>=0)s='+'+s;return s+fmt[2];}
 // ---- gauge ----
@@ -333,10 +337,10 @@ function renderTrend(){curA=a;curB=b;W=box.clientWidth||800;plotW=W-padL-padR;pl
   const xs=X(idxForTs(Math.max(s,TS[curA]))),xe=X(idxForTs(Math.min(e,TS[curB])));
   g+='<rect x="'+xs+'" y="'+padT+'" width="'+Math.max(2,xe-xs)+'" height="'+plotH+'" fill="var(--muted)" opacity="0.30"/>';
   g+='<text x="'+((xs+xe)/2)+'" y="'+(padT+10)+'" font-size="9" fill="var(--ts)" text-anchor="middle">NBER衰退</text>';});
- // ≥6/10 指標同進紅區的高壓叢集期(紅直帶)
- let rs=-1;for(let i=curA;i<=curB;i++){const on=redCount(i)>=REDN;if(on&&rs<0)rs=i;
-  if((!on||i===curB)&&rs>=0){const en=on?i:i-1,xs=X(rs),xe=X(en);
-   g+='<rect x="'+xs+'" y="'+padT+'" width="'+Math.max(1.5,xe-xs)+'" height="'+plotH+'" fill="var(--red)" opacity="0.18"/>';rs=-1;}}
+ // 同時進紅區項數光譜(6→10, 色深遞增)
+ const cw=plotW/Math.max(1,curB-curA);
+ for(let i=curA;i<=curB;i++){const c=redCount(i);if(c>=6){const op=(0.06+(c-5)*0.085).toFixed(3);
+   g+='<rect x="'+(X(i)-cw/2).toFixed(1)+'" y="'+padT+'" width="'+Math.max(1,cw+0.6).toFixed(1)+'" height="'+plotH+'" fill="var(--red)" opacity="'+op+'"/>';}}
  [75,55].forEach(v=>{g+='<line x1="'+padL+'" y1="'+Y(v)+'" x2="'+(W-padR)+'" y2="'+Y(v)+'" stroke="var(--border)" stroke-dasharray="3 3"/>'
   +'<text x="'+(padL-4)+'" y="'+(Y(v)+3)+'" font-size="9" fill="var(--muted)" text-anchor="end">'+v+'</text>';});
  let p='';for(let i=curA;i<=curB;i++)p+=(i==curA?'M':'L')+X(i).toFixed(1)+' '+Y(D.comp[i]).toFixed(1)+' ';
@@ -345,18 +349,25 @@ function renderTrend(){curA=a;curB=b;W=box.clientWidth||800;plotW=W-padL-padR;pl
   const span=curB-curA;if(span>1600?(+yr%2==0):(span>500?true:false)||span<=500)
    g+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+(span>500?yr:D.dates[i].slice(0,7))+'</text>';}}
  g+='<line id="tcx" y1="'+padT+'" y2="'+(padT+plotH)+'" stroke="var(--tp)" opacity="0"/><circle id="tcd" r="3.5" fill="var(--series-1)" opacity="0"/>';
- svg.innerHTML=g;}
-function move(ev){const rect=svg.getBoundingClientRect();const mx=(ev.touches?ev.touches[0].clientX:ev.clientX)-rect.left;
- let i=curA+Math.round((mx-padL)/plotW*(curB-curA));i=Math.max(curA,Math.min(curB,i));sel=i;
- const x=X(i),y=Y(D.comp[i]);$('tcx').setAttribute('x1',x);$('tcx').setAttribute('x2',x);$('tcx').setAttribute('opacity','0.35');
+ svg.innerHTML=g;
+ if(pinned&&pinIdx>=curA&&pinIdx<=curB)showAt(pinIdx);}
+function idxAt(ev){const rect=svg.getBoundingClientRect();const mx=(ev.touches?ev.touches[0].clientX:ev.clientX)-rect.left;
+ let i=curA+Math.round((mx-padL)/plotW*(curB-curA));return Math.max(curA,Math.min(curB,i));}
+function showAt(i){sel=i;const x=X(i),y=Y(D.comp[i]);
+ $('tcx').setAttribute('x1',x);$('tcx').setAttribute('x2',x);$('tcx').setAttribute('opacity',pinned?'0.6':'0.35');
  $('tcd').setAttribute('cx',x);$('tcd').setAttribute('cy',y);$('tcd').setAttribute('opacity','1');
- const rc=redCount(i);
- tip.style.opacity='1';tip.innerHTML='<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>紅區 '+rc+'/10'+(rc>=REDN?' ⚠':'');
+ const rc=redCount(i);tip.style.opacity='1';
+ tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>紅區 '+rc+'/10'+(rc>=REDN?' ⚠':'');
  let tx=x+12;if(tx>W-104)tx=x-104;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';
- $('viewdate').textContent='檢視日期:'+D.dates[i]+' — 下方各燈號為當日數值';
+ $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(再點線圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
  gauge(i);renderCards(i);}
-function leave(){$('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
- sel=b;$('viewdate').textContent='最新('+D.dates[b]+')';gauge(b);renderCards(b);}
+function move(ev){if(pinned)return;showAt(idxAt(ev));}
+function leave(){if(pinned){showAt(pinIdx);return;}
+ $('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
+ sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);}
+function unpin(){pinned=false;pinIdx=null;$('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
+ sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);}
+function onClick(ev){const i=idxAt(ev);if(pinned&&Math.abs(i-pinIdx)<=1){unpin();}else{pinned=true;pinIdx=i;showAt(i);}}
 function setRange(days){a=days<=0?0:Math.max(0,N-days);b=N-1;sel=b;syncInputs();redraw();}
 function syncInputs(){$('d0').value=D.dates[a];$('d1').value=D.dates[b];}
 function redraw(){renderTrend();gauge(sel);renderCards(sel);$('viewdate').textContent='最新('+D.dates[b]+')';
@@ -368,6 +379,7 @@ function fromInputs(){const t0=Date.parse($('d0').value),t1=Date.parse($('d1').v
  if(isNaN(t0)||isNaN(t1)||t0>=t1)return;a=idxForTs(t0);b=idxForTs(t1);sel=b;redraw();}
 $('d0').onchange=fromInputs;$('d1').onchange=fromInputs;
 svg.addEventListener('mousemove',move);svg.addEventListener('mouseleave',leave);
+svg.addEventListener('click',onClick);svg.addEventListener('dblclick',unpin);
 svg.addEventListener('touchmove',e=>move(e),{passive:true});
 let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(renderTrend,150);});
 // ---- 個股搜尋(即時抓 FinMind) ----
@@ -428,7 +440,7 @@ async function renderStockMargin(code){
  box.innerHTML=html;
  $('scmnote').textContent='上列為「'+code+'」個股自身融資指標(危險度=該股歷史百分位);融資單位為張。';
 }
-let SD=null;   // 個股資料
+let SD=null,SA=0,SB=0;   // 個股資料 + 顯示區間[SA,SB]
 function resolveCode(q){q=q.trim();if(!q)return null;const code=q.split(/\s+/)[0];
  if(/^\d{4,6}[A-Z]?$/.test(code)&&STOCKS[code])return code;if(STOCKS[code])return code;
  for(const id in STOCKS)if((id+' '+STOCKS[id][0]).includes(q))return id;return /^\d{4,6}[A-Z]?$/.test(code)?code:null;}
@@ -440,7 +452,8 @@ async function doSearch(){const q=$('q').value;const code=resolveCode(q);
   if(!rows.length){$('qmsg').textContent='查無此檔價格資料(興櫃部分冷門股可能無資料)';$('scwrap').style.display='none';return;}
   SD=adjClose(rows);SD.name=code+' '+nm+(ty?' · '+ty:'');
   $('sctitle').textContent=SD.name;$('scwrap').style.display='';$('qmsg').textContent='';
-  $('scstart').textContent=SD.dates[0];$('scend').textContent=SD.dates[SD.dates.length-1];
+  SA=0;SB=SD.dates.length-1;$('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];
+  document.querySelectorAll('#scranges button').forEach(x=>x.classList.toggle('on',x.dataset.d==='0'));
   drawStock();renderStockMargin(code);
  }catch(e){let m=e.message;
    if(location.protocol==='file:')m='此頁是用「檔案(file://)」開啟,瀏覽器會擋住向 FinMind 的跨站抓取。請改用網址開啟(上線到 GitHub Pages/Netlify),或在此資料夾執行 python -m http.server 後開 http://localhost:8000/';
@@ -448,25 +461,48 @@ async function doSearch(){const q=$('q').value;const code=resolveCode(q);
    $('qmsg').textContent='⚠ '+m;}}
 function drawStock(){if(!SD)return;const svg=$('scsvg'),wrap=$('sc'),tip=$('sctip');
  const W=wrap.clientWidth||800,H=210,pl=46,pr=12,pt=12,pb=22,plotW=W-pl-pr,plotH=H-pt-pb;
- const n=SD.adj.length,ly=SD.adj.map(x=>Math.log10(x));const lo=Math.min(...ly),hi=Math.max(...ly);
- const X=i=>pl+(n<2?0:i/(n-1)*plotW),Y=v=>pt+(hi-v)/((hi-lo)||1)*plotH;
+ const ly=SD.adj.map(x=>Math.log10(x));const win=ly.slice(SA,SB+1);const lo=Math.min(...win),hi=Math.max(...win);
+ const span=SB-SA;const X=i=>pl+(span<1?0:(i-SA)/span*plotW),Y=v=>pt+(hi-v)/((hi-lo)||1)*plotH;
  svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox','0 0 '+W+' '+H);
  let g='';[0,0.25,0.5,0.75,1].forEach(t=>{const lv=lo+(hi-lo)*t,pv=Math.pow(10,lv);
   g+='<line x1="'+pl+'" y1="'+Y(lv)+'" x2="'+(W-pr)+'" y2="'+Y(lv)+'" stroke="var(--border)" stroke-dasharray="3 3"/>'
    +'<text x="'+(pl-4)+'" y="'+(Y(lv)+3)+'" font-size="9" fill="var(--muted)" text-anchor="end">'+(pv>=100?pv.toFixed(0):pv.toFixed(1))+'</text>';});
- let lastY=null;for(let i=0;i<n;i++){const yr=SD.dates[i].slice(0,4);if(yr!==lastY){lastY=yr;if(+yr%3==0)g+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+yr+'</text>';}}
- let p='';for(let i=0;i<n;i++)p+=(i?'L':'M')+X(i).toFixed(1)+' '+Y(ly[i]).toFixed(1)+' ';
+ const showMonth=span<=500;let lastL=null;for(let i=SA;i<=SB;i++){const lab=showMonth?SD.dates[i].slice(0,7):SD.dates[i].slice(0,4);
+  if(lab!==lastL){lastL=lab;if(showMonth||(+lab%(span>2600?3:1)==0))g+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+lab+'</text>';}}
+ let p='';for(let i=SA;i<=SB;i++)p+=(i==SA?'M':'L')+X(i).toFixed(1)+' '+Y(ly[i]).toFixed(1)+' ';
  g+='<path d="'+p+'" fill="none" stroke="var(--series-1)" stroke-width="1.4"/>';
  g+='<line id="scx" y1="'+pt+'" y2="'+(pt+plotH)+'" stroke="var(--tp)" opacity="0"/><circle id="scd" r="3.2" fill="var(--series-1)" opacity="0"/>';
- svg.innerHTML=g;svg._m={X,Y,ly,pl,plotW,n};
- svg.onmousemove=ev=>{const r=svg.getBoundingClientRect();let i=Math.round(((ev.clientX-r.left)-pl)/plotW*(n-1));i=Math.max(0,Math.min(n-1,i));
+ svg.innerHTML=g;
+ $('scstart').textContent=SD.dates[SA];$('scend').textContent=SD.dates[SB];
+ svg.onmousemove=ev=>{const r=svg.getBoundingClientRect();let i=SA+Math.round(((ev.clientX-r.left)-pl)/plotW*span);i=Math.max(SA,Math.min(SB,i));
   const x=X(i),y=Y(ly[i]);$('scx').setAttribute('x1',x);$('scx').setAttribute('x2',x);$('scx').setAttribute('opacity','0.35');
   $('scd').setAttribute('cx',x);$('scd').setAttribute('cy',y);$('scd').setAttribute('opacity','1');
   tip.style.opacity='1';tip.innerHTML='<b>'+SD.dates[i]+'</b><br>收盤 '+SD.raw[i];
   let tx=x+12;if(tx>W-92)tx=x-92;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';};
- svg.onmouseleave=()=>{$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');tip.style.opacity='0';};}
+ svg.onmouseleave=()=>{$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');tip.style.opacity='0';};
+ updateSuit();}
+function updateSuit(){const el=$('scsuit');if(!el||!SD)return;
+ let cs=[],r8=0,tot=0;
+ for(let i=SA;i<=SB;i++){const di=DPOS[SD.dates[i]];if(di==null)continue;tot++;cs.push(D.comp[di]);if(redCount(di)>=REDN)r8++;}
+ if(!tot){el.innerHTML='<span style="color:var(--muted)">此區間早於脆弱度資料(約2013前),無市場脆弱度可對照</span>';return;}
+ const avg=cs.reduce((a,b)=>a+b,0)/cs.length,mx=Math.max(...cs),p8=r8/tot*100;
+ let v,col;
+ if(avg>=70||p8>=25){v='不宜融資持有(系統高壓)';col='var(--red)';}
+ else if(avg>=55||p8>=8){v='融資需謹慎';col='var(--warn)';}
+ else{v='系統壓力低,相對適合';col='var(--ok)';}
+ el.innerHTML='📊 此區間市場脆弱度 平均 <b>'+avg.toFixed(0)+'</b> / 最高 '+mx.toFixed(0)+' · ≥'+REDN+'項紅區天數占 <b>'+p8.toFixed(0)+'%</b> → 融資持有研判:<b style="color:'+col+'">'+v+'</b> <span style="color:var(--muted)">(此為風險框架,非投資建議;可改上方區間比較不同時期)</span>';}
+function scIdxForDate(ds){const t=Date.parse(ds);let lo=0,hi=SD.dates.length-1;const T=SD.dates.map(Date.parse);
+ if(t<=T[0])return 0;if(t>=T[hi])return hi;while(lo<hi){const m=(lo+hi)>>1;if(T[m]<t)lo=m+1;else hi=m;}return lo;}
 function setupSearch(){buildDatalist();$('qbtn').onclick=doSearch;
  $('q').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+ document.querySelectorAll('#scranges button').forEach(btn=>btn.onclick=()=>{if(!SD)return;const d=+btn.dataset.d;
+  SA=d<=0?0:Math.max(0,SD.dates.length-1-d);SB=SD.dates.length-1;
+  document.querySelectorAll('#scranges button').forEach(x=>x.classList.toggle('on',x===btn));
+  $('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];drawStock();});
+ function fromSD(){if(!SD)return;const t0=Date.parse($('sd0').value),t1=Date.parse($('sd1').value);if(isNaN(t0)||isNaN(t1)||t0>=t1)return;
+  SA=scIdxForDate($('sd0').value);SB=scIdxForDate($('sd1').value);
+  document.querySelectorAll('#scranges button').forEach(x=>x.classList.remove('on'));drawStock();}
+ $('sd0').onchange=fromSD;$('sd1').onchange=fromSD;
  let st;window.addEventListener('resize',()=>{clearTimeout(st);st=setTimeout(()=>{if(SD)drawStock();},150);});}
 // init
 buildCards();buildIndBar();setupSearch();syncInputs();renderTrend();gauge(b);renderCards(b);applyRanking();
