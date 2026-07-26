@@ -30,3 +30,14 @@
 
 ## 免責
 本專案為風險分析框架,所有數據僅供研究參考,**非投資建議**。
+
+---
+
+## 產業子分析(新增)
+
+儀表板中段的「產業子分析」提供 AI/熱度題材籃子按鈕(AI伺服器代工、PCB載板、被動元件、晶圓代工封測、IC設計、矽智財IP、散熱、光通訊CPO、記憶體、重電電力、網通設備、電源連接、機殼機構 + 全市場)。點選任一產業後,下方 8 個燈號會**依「該指標對該產業未來 20 日報酬的預測力(Spearman rank-IC)」在目前選定的日期區間內重新排序**,並標出每個指標的 IC 值與名次。切換日期區間(1/3/5年或自訂)會即時重算 IC。
+
+- 產業報酬 = 每題材籃子成分股(可於 `build_industry.py` 的 `THEMES` 自行增修)(還原股價)的**等權日報酬指數**(`build_industry.py` 產生 `industry_returns.json`)。
+- `industry_returns.json` 已含在 repo,`fragility_dashboard.py` 會自動嵌入;若檔案不存在則自動隱藏此區塊。
+- **每週自動更新**:`.github/workflows/weekly-industry.yml` 每週六重建並提交 `industry_returns.json`(較重,約抓 276 檔;建議設定 `FINMIND_TOKEN` secret)。
+- rank-IC 為描述性統計、樣本有限,**非投資建議**,亦非嚴謹的因子回測(未做 point-in-time / 多重檢定校正)。
