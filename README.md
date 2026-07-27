@@ -1,32 +1,66 @@
-# 台股脆弱度儀表板 — GitHub Actions 每日自動版
+# 台股 / 美股脆弱度儀表板 — GitHub Actions 每日自動版
 
-每個交易日收盤後自動抓資料、重算脆弱度、含**美國 VIX**(伺服器端跑 Python,無瀏覽器 CORS 限制),
-把 `index.html` 與歷史分數 `fragility_history.csv` 提交回 repo,由 **GitHub Pages** 發佈成固定網址。
-含**脆弱度歷史趨勢線**與融資追繳壓力測試。純風控壓力計,非投資建議。
+兩張儀表板,**台灣時間每個交易日早上 07:50(開盤前)自動更新**:
+
+| 頁面 | 內容 |
+|---|---|
+| `index.html` | 台股脆弱度(融資餘額 / 三大法人 / 台幣 / 加權指數 + 美股韓股 VIX 外部因素) |
+| `us.html` | 美股脆弱度(**S&P 500 · Nasdaq · 費城半導體 SOX** + FINRA 全市場融資餘額) |
+
+兩頁互相有切換連結,方法論相同:10 項指標一律轉成 **PIT 擴張百分位**(第 t 日只用當日及以前的資料,
+無前視偏誤),加權合成 0–100 脆弱度;含共用釘選游標、個股 K 線 + 月/季/半年線。純風控壓力計,非投資建議。
+
+## 為什麼排在早上 07:50(開盤前)
+
+- **台股**:前一交易日的融資餘額/三大法人約在前一晚 21:00 公布 → 這時跑可拿到**完整的前一日收盤資料**。
+- **美股**:UTC 23:50 = 美東 19:50,美股 16:00 已收盤 → 拿到的是**昨夜美股收盤**。
+
+所以你八點開盤前看到的,是「台股前一日收盤 + 美股昨夜收盤」,正好是開盤前決定要不要降槓桿該看的東西。
 
 ## 一次性設定(約 5 分鐘)
 
 1. 建一個新的 GitHub repository(Public),把本資料夾所有檔案上傳:
-   - `fragility_dashboard.py`、`requirements.txt`、`index.html`、`fragility_history.csv`
-   - `.github/workflows/daily.yml`
+   - 台股:`fragility_dashboard.py`、`index.html`、`fragility_history.csv`
+   - 美股:`us_fragility_dashboard.py`、`us.html`、`us_fragility_history.csv`
+   - 共用:`requirements.txt`、`.github/workflows/daily.yml`
 2. **開啟 Pages**:repo → Settings → Pages → Source 選「Deploy from a branch」→ 分支 `main`、資料夾 `/ (root)` → Save。
    稍等一兩分鐘,網址為 `https://<你的帳號>.github.io/<repo名>/`。
 3. **確認 Actions 有寫入權限**:Settings → Actions → General → 「Workflow permissions」選 **Read and write permissions** → Save。
 4. (可選)**提高 FinMind 上限**:Settings → Secrets and variables → Actions → New repository secret,
    Name = `FINMIND_TOKEN`,Value = 你的 FinMind token(免費註冊 finmindtrade.com)。
-5. 先手動跑一次驗證:repo → Actions → 選「daily-fragility-dashboard」→ Run workflow。
-   跑完後打開你的 Pages 網址就會看到最新儀表板。
+5. 先手動跑一次驗證:repo → Actions → 選「daily-fragility-dashboards」→ Run workflow。
+   跑完後打開 `https://<帳號>.github.io/<repo>/`(台股)與 `.../us.html`(美股)。
 
-之後不用管它:每個工作日 UTC 09:30(台灣 17:30)自動更新,`fragility_history.csv` 會逐日累積,
-歷史趨勢線也會越來越長(頁面另有「回溯」歷史線,第一天就有多年資料可看)。
+之後不用管它:**台灣時間每個交易日 07:50** 自動更新兩張表,歷史分數 csv 會逐日累積。
+(GitHub 排程在尖峰時段可能延遲 5~20 分鐘,屬正常;頁面本身已內建多年回溯歷史線,第一天就有得看。)
+
+## 排程說明
+
+`.github/workflows/daily.yml` 的 cron 是 **`50 23 * * 0-4`**。GitHub cron 一律用 UTC:
+
+- 台灣 = UTC+8 → 台灣 07:50 = UTC 23:50(**前一天**)
+- 星期也要跟著往前挪一天 → UTC 週日~週四 (`0-4`) = **台灣 週一~週五**
+
+台股與美股合併在同一個 job(避免兩個工作流同時 `git push` 打架),任一邊失敗會自動重試 3 次,
+且**不影響另一邊**;兩邊都失敗時 workflow 才會顯示紅字。
 
 ## 調整
-- 改觸發時間:編輯 `.github/workflows/daily.yml` 的 `cron`(UTC 時間)。
-- 改指標權重/門檻:編輯 `fragility_dashboard.py` 上方的 `weights` 與各指標。
+- 改觸發時間:編輯 `.github/workflows/daily.yml` 的 `cron`(記得換算 UTC,跨午夜要順便挪星期)。
+- 改指標權重/門檻:編輯 `fragility_dashboard.py` / `us_fragility_dashboard.py` 上方的 `WEIGHTS`、`INVERT`、`ORDER`。
 
 ## 資料源
+**台股**
 - FinMind:融資餘額 / 加權指數+成交值 / 三大法人(外資)/ USD-TWD
-- FRED:美國 VIX(VIXCLS)/ S&P500
+- FRED:美國 VIX(VIXCLS)/ Nasdaq / KOSPI
+
+**美股**(多來源自動切換,頁面會據實標示當次實際採用的來源)
+- FRED:SP500 / NASDAQCOM / VIXCLS / NFCI / 高收益債利差 / 名目GDP(首選)
+- 備援:Cboe 官方 VIX、芝加哥聯準會 NFCI、SPY/ONEQ/SOXX ETF 還原價代理、世界銀行 GDP
+- FINRA:全市場融資餘額(Margin Statistics,月頻,依發布落後 25 天 PIT 對齊)
+- stockanalysis.com:SOXX(費半 SOX 代理)與個股搜尋(支援 CORS)
+
+> 費城半導體(SOX)指數本身無免費授權資料源,頁面以 **iShares SOXX ETF 還原價代理**,
+> 且 SOXX 於 2021 年由 PHLX SOX 改追蹤 ICE 半導體指數,長期比較請留意。
 
 ## 免責
 本專案為風險分析框架,所有數據僅供研究參考,**非投資建議**。

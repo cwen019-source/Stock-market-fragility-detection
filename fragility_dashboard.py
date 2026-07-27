@@ -99,15 +99,38 @@ def get_data():
         d["gdp_yoy"]=fetch_gdp_yoy(d["asof_year"]-1)   # 名目GDP年增率(已實現年份,PIT)
     return d
 
+def expanding_resid_z(y, cols, min_obs=252):
+    """擴張視窗迴歸 y ~ cols + 截距 的『當期殘差 z』。
+    第 t 期的迴歸係數、殘差平均與標準差,全部只用第 0..t 期資料 → 無前視偏誤
+    (取代全樣本一次迴歸:後者會把未來資訊洩漏進過去的殘差)。以累積交叉乘積遞推,O(n)。"""
+    n=len(y); k=len(cols)+1; out=np.full(n,np.nan)
+    A=np.zeros((k,k)); bvec=np.zeros(k)
+    rs=0.0; rss=0.0; rn=0
+    for i in range(n):
+        xi=np.array([c[i] for c in cols]+[1.0])
+        A+=np.outer(xi,xi); bvec+=xi*y[i]
+        if i+1<min_obs: continue
+        try: beta=np.linalg.solve(A+np.eye(k)*1e-8, bvec)
+        except np.linalg.LinAlgError: continue
+        r=y[i]-xi@beta
+        rs+=r; rss+=r*r; rn+=1
+        if rn>30:
+            mu=rs/rn; var=max(rss/rn-mu*mu,1e-12)
+            out[i]=(r-mu)/math.sqrt(var)
+    return out
+
 def compute(d):
     R={}; idx=d.get("idx"); margin=d.get("margin"); turn=d.get("turn")
     base=pd.DataFrame({"idx":idx,"margin":margin,"turn":turn}).dropna()
     if len(base)>300:
-        b=base.copy(); b["tma"]=b["turn"].rolling(60).mean().bfill()
-        X=np.column_stack([np.log(b["idx"]),np.log(b["tma"]),np.ones(len(b))]); y=np.log(b["margin"])
-        beta,_,_,_=np.linalg.lstsq(X,y,rcond=None); resid=y-X@beta; zr=(resid-resid.mean())/resid.std()
-        R["margin_resid_z"]=dict(val=float(zr.iloc[-1]),series=zr,unit="σ",label="融資超額水位",
-            note="剔除指數/量能後,融資多出幾個σ(去趨勢殘差)")
+        b=base.copy(); b["tma"]=b["turn"].rolling(60).mean()
+        b=b.dropna(subset=["tma"])                      # 不用 bfill(回填=用到未來資料)
+        zr=expanding_resid_z(np.log(b["margin"].values),
+                             [np.log(b["idx"].values), np.log(b["tma"].values)], min_obs=252)
+        zr=pd.Series(zr,index=b.index).dropna()
+        if len(zr)>200:
+            R["margin_resid_z"]=dict(val=float(zr.iloc[-1]),series=zr,unit="σ",label="融資超額水位",
+                note="剔除指數/量能後,融資多出幾個σ(去趨勢殘差;擴張視窗迴歸·無前視)")
     if len(base)>260:
         m_yoy=base["margin"].pct_change(244)*100
         gdp=d.get("gdp_yoy")
@@ -277,9 +300,11 @@ table{width:100%;border-collapse:collapse;background:var(--surface);border:1px s
 th,td{padding:9px 12px;font-size:13px;border-bottom:1px solid var(--border);text-align:left}
 th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
 .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--series-1);border-radius:8px;padding:12px 15px;margin-top:18px;font-size:12px;color:var(--ts);line-height:1.6}
+.xlink{display:inline-block;margin-top:8px;font-size:12px;color:var(--series-1);text-decoration:none;border:1px solid var(--border);border-radius:7px;padding:4px 10px}
 #th{position:fixed;top:12px;right:12px;background:var(--surface);color:var(--tp);border:1px solid var(--border);border-radius:8px;padding:6px 11px;cursor:pointer}
 </style></head><body><button id="th">◐</button><div class="wrap">
 <h1>台股脆弱度儀表板 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">PIT 無前視偏誤</span></h1><div class="sub">資料 FinMind + FRED · 更新於 __ASOF__ · 危險度=PIT擴張百分位(只用當日及以前) · 壓力計非擇時工具 · 非投資建議</div>
+<a class="xlink" href="us.html">→ 切換到美股脆弱度儀表板(S&amp;P500 · Nasdaq · 費半)</a>
 <div class="hero"><div class="gauge" id="gauge"><div class="inner"><div><div class="num" id="cnum">–</div><div class="lb">脆弱度 / 100</div></div></div></div>
  <div class="txt"><div class="big" id="cjudge">–</div>
  <div class="d">脆弱度為 10 項燈號之 PIT 歷史百分位加權(無前視偏誤)。高分代表系統結構脆弱、槓桿堆疊,屬事前風險預警,非崩跌時點預測——用於降槓桿,不作擇時。</div>
@@ -293,9 +318,9 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
   <span id="qmsg" style="font-size:12px;color:var(--muted)"></span></div>
  <div id="scwrap" style="display:none;margin-top:10px"><div id="sctitle" style="font-size:14px;font-weight:650;margin-bottom:4px"></div>
   <div class="ctrl" id="scranges" style="margin:0 0 6px"><button data-d="244">1年</button><button data-d="732">3年</button><button data-d="1220">5年</button><button data-d="0" class="on">全部</button>
-   <input type="date" id="sd0"><span style="color:var(--muted)">~</span><input type="date" id="sd1"></div>
+   <span style="color:var(--muted);font-size:11px">(日期範圍見下方脆弱度圖,兩圖共用)</span></div>
   <div id="sc" style="position:relative"><svg id="scsvg"></svg><div id="sctip"></div></div>
-  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數刻度);<b>背景=市場高危險區</b>(脆弱度≥75 紅、55–75 橙,與儀表一致);滑鼠移過看收盤</span><span id="scend"></span></div>
+  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數刻度);<b>背景=市場高危險區</b>(脆弱度≥75 紅、55–75 橙,與儀表一致);<b>兩圖共用游標</b>,移過任一圖另一圖同步,點一下可釘選(點兩下取消)</span><span id="scend"></span></div>
   <div id="scsuit" style="font-size:12.5px;margin-top:8px;padding:8px 11px;background:var(--bg);border:1px solid var(--border);border-radius:9px"></div>
   <div id="scstats" class="scstats"></div>
   <div id="scmnote" style="font-size:10.5px;color:var(--muted);margin-top:4px"></div></div></div>
@@ -314,7 +339,7 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
 <div class="grid" id="grp-external"></div>
 <h2>壓力測試 / 敏感度分析(融資追繳連鎖,示意性)</h2>
 <table><thead><tr><th>情境</th><th>估計平均維持率</th><th>逼近斷頭比例</th><th>潛在追繳部位</th></tr></thead><tbody>__STRESS__</tbody></table>
-<div class="note"><b>方法與限制:</b>各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>與<b>成長率背離(vs 名目GDP)</b>雙軌:成長背離改以 <b>IMF WEO 台灣名目GDP 年增率</b>(DBnomics,年頻,僅取已實現年份、PIT 落後)為分母——把「經濟自然成長」放進分母,<b>去除用被炒高的指數當分母的泡沫污染</b>(GDP 源不可得時自動退回指數)。真 GDP 為<b>季頻、落後 1–2 月、會修正</b>,故僅用年頻已實現值當慢速結構性錨,非即時訊號。壓力測試假設整體融資維持率約常態(均值160%、斷頭130%),僅為示意非精算。目前融資餘額約 __MARGIN__ 億。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<b>本頁為風險框架,非投資建議。</b></div>
+<div class="note"><b>方法與限制:</b>各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>(<b>擴張視窗迴歸</b>:每日迴歸係數與標準化只用當日及以前資料,已消除「全樣本一次迴歸」造成的前視洩漏)與<b>成長率背離(vs 名目GDP)</b>雙軌:成長背離改以 <b>IMF WEO 台灣名目GDP 年增率</b>(DBnomics,年頻,僅取已實現年份、PIT 落後)為分母——把「經濟自然成長」放進分母,<b>去除用被炒高的指數當分母的泡沫污染</b>(GDP 源不可得時自動退回指數)。真 GDP 為<b>季頻、落後 1–2 月、會修正</b>,故僅用年頻已實現值當慢速結構性錨,非即時訊號。壓力測試假設整體融資維持率約常態(均值160%、斷頭130%),僅為示意非精算。目前融資餘額約 __MARGIN__ 億。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<b>本頁為風險框架,非投資建議。</b></div>
 </div>
 <script>__APPJS__</script>
 <script>document.getElementById('th').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')=='dark'?'light':'dark');if(window.__redraw)window.__redraw();};
@@ -410,21 +435,39 @@ function renderTrend(){curA=a;curB=b;W=box.clientWidth||800;plotW=W-padL-padR;pl
  if(pinned&&pinIdx>=curA&&pinIdx<=curB)showAt(pinIdx);}
 function idxAt(ev){const rect=svg.getBoundingClientRect();const mx=(ev.touches?ev.touches[0].clientX:ev.clientX)-rect.left;
  let i=curA+Math.round((mx-padL)/plotW*(curB-curA));return Math.max(curA,Math.min(curB,i));}
+let SCG=null;   // 個股圖幾何快照(供跨圖共用游標)
+// 依日期在個股圖畫出同步游標(釘選游標:兩張圖以同一日期對齊)
+function syncStockCursor(ds){if(!SD||!SCG)return;const j=scIdxForDate(ds);
+ if(j<SCG.SA||j>SCG.SB){$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');$('sctip').style.opacity='0';return;}
+ const x=SCG.X(j),y=SCG.Y(SCG.ly[j]);
+ $('scx').setAttribute('x1',x);$('scx').setAttribute('x2',x);$('scx').setAttribute('opacity',pinned?'0.6':'0.35');
+ $('scd').setAttribute('cx',x);$('scd').setAttribute('cy',y);$('scd').setAttribute('opacity','1');
+ const tp=$('sctip');tp.style.opacity='1';const pf=v=>(v==null||v<=0)?'–':(v>=100?v.toFixed(0):v.toFixed(1));
+ tp.innerHTML=(pinned?'📌 ':'')+'<b>'+SD.dates[j]+'</b><br>收盤 '+SD.raw[j]+' <span style="color:var(--muted)">(還原'+pf(SD.adj[j])+')</span>'
+  +'<br><span style="color:#2a78d6">月'+pf(SD.ma20?SD.ma20[j]:null)+'</span> <span style="color:#8b5cf6">季'+pf(SD.ma60?SD.ma60[j]:null)+'</span> <span style="color:#0891b2">半年'+pf(SD.ma120?SD.ma120[j]:null)+'</span>';
+ let tx=x+12;if(tx>SCG.W-104)tx=x-104;tp.style.left=Math.max(0,tx)+'px';tp.style.top='4px';
+ renderStockCardsAt(j);}
+function hideStockCursor(){if(!SD)return;$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');$('sctip').style.opacity='0';if(SM)renderStockCardsAt(SB);}
 function showAt(i){sel=i;const x=X(i),y=Y(D.comp[i]);
  $('tcx').setAttribute('x1',x);$('tcx').setAttribute('x2',x);$('tcx').setAttribute('opacity',pinned?'0.6':'0.35');
  $('tcd').setAttribute('cx',x);$('tcd').setAttribute('cy',y);$('tcd').setAttribute('opacity','1');
  const rc=redCount(i);tip.style.opacity='1';
  tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>紅區 '+rc+'/10'+(rc>=REDN?' ⚠':'');
  let tx=x+12;if(tx>W-104)tx=x-104;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';
- $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(再點線圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
- gauge(i);renderCards(i);}
+ $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(移動任一圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
+ gauge(i);renderCards(i);
+ syncStockCursor(D.dates[i]);}   // ← 共用游標:同步個股圖
 function move(ev){if(pinned)return;showAt(idxAt(ev));}
 function leave(){if(pinned){showAt(pinIdx);return;}
  $('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
- sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);}
+ sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);hideStockCursor();}
 function unpin(){pinned=false;pinIdx=null;$('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
- sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);}
+ sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);hideStockCursor();}
 function onClick(ev){const i=idxAt(ev);if(pinned&&Math.abs(i-pinIdx)<=1){unpin();}else{pinned=true;pinIdx=i;showAt(i);}}
+// 由個股圖的滑鼠位置換算共用游標(對映到脆弱度日期,驅動兩圖)
+function stockFragIdx(clientX){const r=$('scsvg').getBoundingClientRect();const g=SCG;if(!g)return null;
+ let j=g.SA+Math.round(((clientX-r.left)-g.pl)/g.plotW*(g.SB-g.SA));j=Math.max(g.SA,Math.min(g.SB,j));
+ const ds=SD.dates[j];const fi=(DPOS[ds]!=null?DPOS[ds]:idxForTs(Date.parse(ds)));return Math.max(curA,Math.min(curB,fi));}
 function syncInputs(){$('d0').value=D.dates[a];$('d1').value=D.dates[b];}
 // ---- 共用時間軸:一組控制同時驅動脆弱度圖與個股圖 ----
 function markBtns(days){document.querySelectorAll('#ranges button,#scranges button').forEach(x=>x.classList.toggle('on',+x.dataset.d===days));}
@@ -433,7 +476,7 @@ function applyWindow(d0,d1){                    // d0,d1:日期字串,兩張圖�
  a=idxForTs(Date.parse(d0));b=idxForTs(Date.parse(d1));sel=b;
  $('d0').value=D.dates[a];$('d1').value=D.dates[b];
  renderTrend();gauge(sel);renderCards(sel);applyRanking();
- if(SD){SA=scIdxForDate(d0);SB=scIdxForDate(d1);$('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];drawStock();}
+ if(SD){SA=scIdxForDate(d0);SB=scIdxForDate(d1);drawStock();}
 }
 function sharedDays(days){b=N-1;a=days<=0?0:Math.max(0,N-days);markBtns(days);applyWindow(D.dates[a],D.dates[b]);}
 function sharedDates(d0,d1){if(!d0||!d1||Date.parse(d0)>=Date.parse(d1))return;clearBtns();applyWindow(d0,d1);}
@@ -456,8 +499,13 @@ async function fmFetch(ds,id){const p=new URLSearchParams({dataset:ds,data_id:id
  if(!r.ok)throw new Error('HTTP '+r.status+(r.status==402?'(速率上限,稍後或加 ?token=)':''));return (await r.json()).data||[];}
 function adjClose(rows){rows=rows.filter(r=>+r.close>0).sort((a,b)=>a.date<b.date?-1:1);
  if(rows.length<2)return null;const dates=rows.map(r=>r.date),raw=rows.map(r=>+r.close),vol=rows.map(r=>+r.Trading_Volume||0);
+ const ropen=rows.map(r=>+r.open||0),rhigh=rows.map(r=>+r.max||0),rlow=rows.map(r=>+r.min||0);
  let f=raw[0];const adj=[raw[0]];for(let i=1;i<raw.length;i++){let lr=Math.log(raw[i]/raw[i-1]);if(Math.abs(lr)>0.13)lr=0;f*=Math.exp(lr);adj.push(f);}
- return {dates,raw,adj,vol};}
+ const rt=adj.map((a,i)=>raw[i]>0?a/raw[i]:1);   // 還原比例(套用同一調整因子到 OHLC)
+ const aopen=ropen.map((v,i)=>v>0?v*rt[i]:null),ahigh=rhigh.map((v,i)=>v>0?v*rt[i]:null),alow=rlow.map((v,i)=>v>0?v*rt[i]:null);
+ return {dates,raw,adj,vol,aopen,ahigh,alow};}
+// 簡單移動平均(以還原收盤計算;未滿 n 日為 null)
+function sma(arr,n){const out=new Array(arr.length).fill(null);let s=0;for(let i=0;i<arr.length;i++){const v=arr[i]||0;s+=v;if(i>=n)s-=(arr[i-n]||0);if(i>=n-1)out[i]=s/n;}return out;}
 // 小工具
 function ols3(X,y){const k=X[0].length,A=Array.from({length:k},()=>Array(k).fill(0)),bb=Array(k).fill(0);
  for(let i=0;i<X.length;i++){for(let a=0;a<k;a++){bb[a]+=X[i][a]*y[i];for(let c=0;c<k;c++)A[a][c]+=X[i][a]*X[i][c];}}
@@ -468,17 +516,24 @@ function pctile(arr,v){const s=arr.filter(x=>x!=null&&!isNaN(x));return s.length
 function stLight(p){return p==null?'':p>=75?'red':p>=55?'warn':'ok';}
 let _txmap=null;
 function txMap(){if(_txmap)return _txmap;_txmap=new Map();const t=D.taiex||{dates:[],close:[]};for(let i=0;i<t.dates.length;i++)_txmap.set(t.dates[i],t.close[i]);return _txmap;}
-function computeBeta(win){
+function computeBeta(win){return computeBetaAt(win,SD?SD.dates.length-1:0);}
+// 市場 Beta:以「截至第 t 日、往前 win 日」的個股vs大盤(TAIEX)日報酬迴歸斜率(前推視窗)
+function computeBetaAt(win,t){
  if(!SD||!D.taiex||!D.taiex.dates.length)return null;const tm=txMap();const rs=[],rm=[];
- const start=Math.max(1,SD.dates.length-win-1);
- for(let i=start;i<SD.dates.length;i++){const m=tm.get(SD.dates[i]),mp=tm.get(SD.dates[i-1]);const sp=SD.adj[i-1],sc=SD.adj[i];
+ const start=Math.max(1,t-win+1);
+ for(let i=start;i<=t;i++){const m=tm.get(SD.dates[i]),mp=tm.get(SD.dates[i-1]);const sp=SD.adj[i-1],sc=SD.adj[i];
   if(m==null||mp==null||sp<=0||sc<=0||mp<=0||m<=0)continue;rs.push(Math.log(sc/sp));rm.push(Math.log(m/mp));}
  if(rs.length<60)return null;
  const mmn=rm.reduce((a,b)=>a+b,0)/rm.length,smn=rs.reduce((a,b)=>a+b,0)/rs.length;
  let cov=0,vm=0;for(let i=0;i<rs.length;i++){cov+=(rs[i]-smn)*(rm[i]-mmn);vm+=(rm[i]-mmn)**2;}
  return vm>0?cov/vm:null;}
+// PIT 百分位:只用「第 t 日及以前」的非空值計算(游標指向歷史點時,危險度不含未來資訊)
+function pctileAt(arr,t){const v=arr[t];if(v==null||isNaN(v))return null;let cnt=0,less=0;
+ for(let i=0;i<=t&&i<arr.length;i++){const x=arr[i];if(x==null||isNaN(x))continue;cnt++;if(x<v)less++;}
+ return cnt?less/cnt*100:null;}
+let SM=null;   // 已抓取之個股融資序列(供各時點重算)
 async function renderStockMargin(code){
- const box=$('scstats');box.innerHTML='';$('scmnote').textContent='';
+ SM=null;const box=$('scstats');box.innerHTML='';$('scmnote').textContent='';
  let rows;try{rows=await fmFetch('TaiwanStockMarginPurchaseShortSale',code);}catch(e){return;}
  if(!rows||!rows.length){$('scmnote').textContent='(此檔無融資融券資料)';return;}
  // 對齊到股價日期(SD.dates)
@@ -489,38 +544,45 @@ async function renderStockMargin(code){
  let ls=null;const sbal=D0.map(d=>{if(sm.has(d))ls=sm.get(d);return ls;});
  const adj=SD.adj,vol=SD.vol,n=D0.length;
  const pc=(a,k,i)=>(i>=k&&a[i-k]>0&&a[i]!=null&&a[i-k]!=null)?(a[i]/a[i-k]-1)*100:null;
- // 半年擴張 & YoY背離 序列(供百分位)
- const roc=[],ydiv=[];
- for(let i=0;i<n;i++){roc.push(pc(bal,126,i));const my=pc(bal,244,i),py=pc(adj,244,i);ydiv.push((my!=null&&py!=null)?my-py:null);}
- // 融資超額水位:log(bal)~log(adj)+log(volMA20) 殘差z(需足夠歷史)
- let residZ=null,residSeries=null;
+ // 逐日序列:半年擴張、YoY背離、使用率、券資比(各時點皆可讀)
+ const roc=[],ydiv=[],usage=[],shortR=[];
+ for(let i=0;i<n;i++){roc.push(pc(bal,126,i));const my=pc(bal,244,i),py=pc(adj,244,i);ydiv.push((my!=null&&py!=null)?my-py:null);
+  usage.push((bal[i]!=null&&limit[i]>0)?bal[i]/limit[i]*100:null);
+  shortR.push((bal[i]>0&&sbal[i]!=null)?sbal[i]/bal[i]*100:null);}
+ // 融資超額水位:log(bal)~log(adj)+log(volMA20) 殘差z(整段迴歸,值依原索引存回)
+ let residSeries=new Array(n).fill(null);
  const volma=vol.map((_,i)=>i<20?null:vol.slice(i-19,i+1).reduce((x,y)=>x+y,0)/20);
  const Xr=[],Yr=[],idxr=[];
  for(let i=0;i<n;i++){if(bal[i]>0&&adj[i]>0&&volma[i]>0){Xr.push([Math.log(adj[i]),Math.log(volma[i]),1]);Yr.push(Math.log(bal[i]));idxr.push(i);}}
  if(Xr.length>200){const bt=ols3(Xr,Yr);const res=Yr.map((y,j)=>y-(Xr[j][0]*bt[0]+Xr[j][1]*bt[1]+bt[2]));
   const mu=res.reduce((a,b)=>a+b,0)/res.length,sd=Math.sqrt(res.reduce((a,b)=>a+(b-mu)*(b-mu),0)/res.length);
-  residSeries=res.map(r=>(r-mu)/sd);residZ=residSeries[residSeries.length-1];}
- const L=n-1;
- const usage=(bal[L]!=null&&limit[L]>0)?bal[L]/limit[L]*100:null;
- const shortR=(bal[L]>0&&sbal[L]!=null)?sbal[L]/bal[L]*100:null;
+  res.forEach((r,j)=>{residSeries[idxr[j]]=sd>0?(r-mu)/sd:null;});}
+ SM={code,bal,limit,sbal,roc,ydiv,usage,shortR,residSeries,n};
+ renderStockCardsAt(SB);
+}
+// 依「第 t 日」重算並顯示個股指標卡(游標指向該點時觸發;窗口皆前推至 t)
+function renderStockCardsAt(t){if(!SM||!SD)return;t=Math.max(0,Math.min(SM.n-1,t));
+ const box=$('scstats');const {code,bal,roc,ydiv,usage,shortR,residSeries}=SM;
+ const f1=x=>x==null?'–':(x>=0?'+':'')+x.toFixed(1);
+ const beta=computeBetaAt(252,t);
+ const residZ=residSeries[t];
+ const us=usage[t],sr=shortR[t];
  function tile(label,val,sub,p){const lt=stLight(p);
   return '<div class="stile '+lt+'"><div class="l">'+label+'</div><div class="v">'+val+'</div><div class="s">'+(sub||'')+'</div></div>';}
- const f1=x=>x==null?'–':(x>=0?'+':'')+x.toFixed(1);
- // 市場 Beta:近252日 個股vs大盤(TAIEX)日報酬迴歸斜率
- const beta=computeBeta(252);
- const marketRed=(D.comp[D.comp.length-1]>=75);
- const priority=(beta!=null&&beta>=1.2)&&(marketRed||(residZ!=null&&residZ>1)||(usage!=null&&usage>=60));
  let html='';
  html+=tile('市場Beta(1年)',beta==null?'–':beta.toFixed(2),'對大盤敏感度'+(beta!=null&&beta>=1.2?' · 高':''), beta==null?null:Math.min(100,Math.max(0,(beta-0.5)/1.5*100)));
- html+=tile('融資餘額(張)',bal[L]!=null?bal[L].toLocaleString():'–','半年擴張 '+f1(roc[L])+'%',pctile(roc,roc[L]));
- html+=tile('融資成長背離',f1(ydiv[L])+'pp','融資YoY−股價YoY',pctile(ydiv,ydiv[L]));
- html+=tile('融資超額水位',residZ==null?'資料不足':f1(residZ)+'σ','去趨勢殘差',residSeries?pctile(residSeries,residZ):null);
- html+=tile('融資使用率',usage==null?'–':usage.toFixed(0)+'%','餘額/限額',usage);
- html+=tile('券資比',shortR==null?'–':shortR.toFixed(0)+'%','融券/融資',null);
+ html+=tile('融資餘額(張)',bal[t]!=null?Math.round(bal[t]).toLocaleString():'–','半年擴張 '+f1(roc[t])+'%',pctileAt(roc,t));
+ html+=tile('融資成長背離',f1(ydiv[t])+'pp','融資YoY−股價YoY',pctileAt(ydiv,t));
+ html+=tile('融資超額水位',residZ==null?'資料不足':f1(residZ)+'σ','去趨勢殘差',pctileAt(residSeries,t));
+ html+=tile('融資使用率',us==null?'–':us.toFixed(0)+'%','餘額/限額',us);
+ html+=tile('券資比',sr==null?'–':sr.toFixed(0)+'%','融券/融資',null);
  box.innerHTML=html;
- $('scmnote').innerHTML='上列為「'+code+'」個股自身指標(危險度=該股歷史百分位)。'
+ const marketDi=DPOS[SD.dates[t]];const marketRed=(marketDi!=null&&D.comp[marketDi]>=75);
+ const priority=(beta!=null&&beta>=1.2)&&(marketRed||(residZ!=null&&residZ>1)||(us!=null&&us>=60));
+ const isLatest=(t===SM.n-1);
+ $('scmnote').innerHTML='<b>指標時點 '+SD.dates[t]+(isLatest?'(最新)':'(游標點·前推視窗計算)')+'</b> — 「'+code+'」個股自身指標(危險度=該股至此日之歷史百分位,無前視)。'
    +(priority?' <b style="color:var(--red)">⚠ 高Beta＋槓桿/估值偏高:系統紅燈時建議「優先對本檔降槓桿」</b>':'')
-   +' Beta 高('+'≥1.2)代表系統去槓桿時本檔跌幅會被放大。';
+   +' Beta 高(≥1.2)代表系統去槓桿時本檔跌幅會被放大。';
 }
 let SD=null,SA=0,SB=0;   // 個股資料 + 顯示區間[SA,SB]
 function resolveCode(q){q=q.trim();if(!q)return null;const code=q.split(/\s+/)[0];
@@ -533,10 +595,10 @@ async function doSearch(){const q=$('q').value;const code=resolveCode(q);
  try{const rows=await fmFetch('TaiwanStockPrice',code);
   if(!rows.length){$('qmsg').textContent='查無此檔價格資料(興櫃部分冷門股可能無資料)';$('scwrap').style.display='none';return;}
   SD=adjClose(rows);SD.name=code+' '+nm+(ty?' · '+ty:'');
+  SD.ma20=sma(SD.adj,20);SD.ma60=sma(SD.adj,60);SD.ma120=sma(SD.adj,120);   // 月線/季線/半年線(還原收盤)
   $('sctitle').textContent=SD.name;$('scwrap').style.display='';$('qmsg').textContent='';
   // 對齊到目前脆弱度圖的時間窗(共用時間軸)
   SA=scIdxForDate(D.dates[a]);SB=scIdxForDate(D.dates[b]);
-  $('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];
   renderStockMargin(code);drawStock();
  }catch(e){let m=e.message;
    if(location.protocol==='file:')m='此頁是用「檔案(file://)」開啟,瀏覽器會擋住向 FinMind 的跨站抓取。請改用網址開啟(上線到 GitHub Pages/Netlify),或在此資料夾執行 python -m http.server 後開 http://localhost:8000/';
@@ -544,8 +606,13 @@ async function doSearch(){const q=$('q').value;const code=resolveCode(q);
    $('qmsg').textContent='⚠ '+m;}}
 function drawStock(){if(!SD)return;const svg=$('scsvg'),wrap=$('sc'),tip=$('sctip');
  const W=wrap.clientWidth||800,H=210,pl=46,pr=12,pt=12,pb=22,plotW=W-pl-pr,plotH=H-pt-pb;
- const ly=SD.adj.map(x=>Math.log10(x));const win=ly.slice(SA,SB+1);const lo=Math.min(...win),hi=Math.max(...win);
- const span=SB-SA;const X=i=>pl+(span<1?0:(i-SA)/span*plotW),Y=v=>pt+(hi-v)/((hi-lo)||1)*plotH;
+ const ly=SD.adj.map(x=>Math.log10(x));const span=SB-SA;
+ // y 範圍:納入還原 OHLC 高低與三條均線,避免K棒影線/均線被裁掉
+ let vmn=Infinity,vmx=-Infinity;const psh=v=>{if(v!=null&&v>0){if(v<vmn)vmn=v;if(v>vmx)vmx=v;}};
+ for(let i=SA;i<=SB;i++){psh(SD.ahigh[i]!=null?SD.ahigh[i]:SD.adj[i]);psh(SD.alow[i]!=null?SD.alow[i]:SD.adj[i]);psh(SD.ma20[i]);psh(SD.ma60[i]);psh(SD.ma120[i]);}
+ if(!isFinite(vmn)){vmn=Math.min(...SD.adj.slice(SA,SB+1));vmx=Math.max(...SD.adj.slice(SA,SB+1));}
+ const lo=Math.log10(vmn),hi=Math.log10(vmx);
+ const X=i=>pl+(span<1?0:(i-SA)/span*plotW),Y=v=>pt+(hi-v)/((hi-lo)||1)*plotH;const Yl=pv=>Y(Math.log10(pv));
  svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox','0 0 '+W+' '+H);
  let g='';[0,0.25,0.5,0.75,1].forEach(t=>{const lv=lo+(hi-lo)*t,pv=Math.pow(10,lv);
   g+='<line x1="'+pl+'" y1="'+Y(lv)+'" x2="'+(W-pr)+'" y2="'+Y(lv)+'" stroke="var(--border)" stroke-dasharray="3 3"/>'
@@ -558,17 +625,35 @@ function drawStock(){if(!SD)return;const svg=$('scsvg'),wrap=$('sc'),tip=$('scti
   g+='<rect x="'+(X(i)-cw/2).toFixed(1)+'" y="'+pt+'" width="'+Math.max(1,cw+0.6).toFixed(1)+'" height="'+plotH+'" fill="'+col+'" opacity="'+op+'"/>';}
  const showMonth=span<=500;let lastL=null;for(let i=SA;i<=SB;i++){const lab=showMonth?SD.dates[i].slice(0,7):SD.dates[i].slice(0,4);
   if(lab!==lastL){lastL=lab;if(showMonth||(+lab%(span>2600?3:1)==0))g+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+lab+'</text>';}}
- let p='';for(let i=SA;i<=SB;i++)p+=(i==SA?'M':'L')+X(i).toFixed(1)+' '+Y(ly[i]).toFixed(1)+' ';
- g+='<path d="'+p+'" fill="none" stroke="var(--series-1)" stroke-width="1.4"/>';
+ // K線(還原OHLC;台股慣例:收≥開為紅、收<開為綠)。太密(K棒<2.2px)則退回還原收盤線
+ const slot=plotW/Math.max(1,span+1),drawK=slot>=2.2;
+ if(drawK){const bw=Math.max(1,Math.min(9,slot*0.62));
+  for(let i=SA;i<=SB;i++){const o=SD.aopen[i],c=SD.adj[i],h=SD.ahigh[i],l=SD.alow[i];if(!(c>0))continue;
+   const x=X(i),up=(o!=null?c>=o:true),col=up?'var(--red)':'var(--ok)';
+   if(h>0&&l>0)g+='<line x1="'+x.toFixed(1)+'" y1="'+Yl(h).toFixed(1)+'" x2="'+x.toFixed(1)+'" y2="'+Yl(l).toFixed(1)+'" stroke="'+col+'" stroke-width="1"/>';
+   if(o!=null&&o>0){const yo=Yl(o),yc=Yl(c),top=Math.min(yo,yc),ht=Math.max(1,Math.abs(yo-yc));
+    g+='<rect x="'+(x-bw/2).toFixed(1)+'" y="'+top.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+ht.toFixed(1)+'" fill="'+col+'"/>';}}
+ }else{let p='';for(let i=SA;i<=SB;i++)p+=(i==SA?'M':'L')+X(i).toFixed(1)+' '+Y(ly[i]).toFixed(1)+' ';
+  g+='<path d="'+p+'" fill="none" stroke="var(--ts)" stroke-width="1.2" opacity="0.75"/>';}
+ // 均線:月線(20)/季線(60)/半年線(120)
+ function maPath(ma){let p='',on=false;for(let i=SA;i<=SB;i++){const v=ma[i];if(v==null||v<=0){on=false;continue;}p+=(on?'L':'M')+X(i).toFixed(1)+' '+Yl(v).toFixed(1)+' ';on=true;}return p;}
+ const MAS=[[SD.ma20,'#2a78d6','月線20'],[SD.ma60,'#8b5cf6','季線60'],[SD.ma120,'#0891b2','半年線120']];
+ MAS.forEach(m=>{const d=maPath(m[0]);if(d)g+='<path d="'+d+'" fill="none" stroke="'+m[1]+'" stroke-width="1.2" opacity="0.95"/>';});
+ // 圖例
+ let lx=pl+3;MAS.forEach(m=>{g+='<line x1="'+lx+'" y1="'+(pt+7)+'" x2="'+(lx+13)+'" y2="'+(pt+7)+'" stroke="'+m[1]+'" stroke-width="2"/>'
+  +'<text x="'+(lx+16)+'" y="'+(pt+10)+'" font-size="9" fill="var(--muted)">'+m[2]+'</text>';lx+=16+m[2].length*9+16;});
  g+='<line id="scx" y1="'+pt+'" y2="'+(pt+plotH)+'" stroke="var(--tp)" opacity="0"/><circle id="scd" r="3.2" fill="var(--series-1)" opacity="0"/>';
  svg.innerHTML=g;
  $('scstart').textContent=SD.dates[SA];$('scend').textContent=SD.dates[SB];
- svg.onmousemove=ev=>{const r=svg.getBoundingClientRect();let i=SA+Math.round(((ev.clientX-r.left)-pl)/plotW*span);i=Math.max(SA,Math.min(SB,i));
-  const x=X(i),y=Y(ly[i]);$('scx').setAttribute('x1',x);$('scx').setAttribute('x2',x);$('scx').setAttribute('opacity','0.35');
-  $('scd').setAttribute('cx',x);$('scd').setAttribute('cy',y);$('scd').setAttribute('opacity','1');
-  tip.style.opacity='1';tip.innerHTML='<b>'+SD.dates[i]+'</b><br>收盤 '+SD.raw[i];
-  let tx=x+12;if(tx>W-92)tx=x-92;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';};
- svg.onmouseleave=()=>{$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');tip.style.opacity='0';};
+ SCG={X,Y,ly,SA,SB,W,pl,plotW};   // 幾何快照:供跨圖共用游標定位
+ // 個股圖滑鼠 → 換算共用日期 → 驅動兩圖(釘選游標)
+ svg.onmousemove=ev=>{if(pinned)return;const fi=stockFragIdx(ev.clientX);if(fi!=null)showAt(fi);};
+ svg.onmouseleave=()=>{leave();};
+ svg.onclick=ev=>{const fi=stockFragIdx(ev.clientX);if(fi==null)return;
+  if(pinned&&Math.abs(fi-pinIdx)<=1){unpin();}else{pinned=true;pinIdx=fi;showAt(fi);}};
+ svg.ondblclick=unpin;
+ if(pinned&&pinIdx>=curA&&pinIdx<=curB)syncStockCursor(D.dates[pinIdx]);   // 重繪後保持釘選游標
+ else if(SM)renderStockCardsAt(SB);   // 未指向時,卡片對齊目前視窗右緣(SB)
  updateSuit();}
 function updateSuit(){const el=$('scsuit');if(!el||!SD)return;
  let cs=[],r8=0,tot=0;
@@ -584,10 +669,8 @@ function scIdxForDate(ds){const t=Date.parse(ds);let lo=0,hi=SD.dates.length-1;c
  if(t<=T[0])return 0;if(t>=T[hi])return hi;while(lo<hi){const m=(lo+hi)>>1;if(T[m]<t)lo=m+1;else hi=m;}return lo;}
 function setupSearch(){buildDatalist();$('qbtn').onclick=doSearch;
  $('q').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
- // 個股圖的區間控制 → 走共用時間軸(同步驅動脆弱度圖)
+ // 個股圖的區間鈕 → 走共用時間軸(同步驅動脆弱度圖;日期輸入已統一至脆弱度圖)
  document.querySelectorAll('#scranges button').forEach(btn=>btn.onclick=()=>sharedDays(+btn.dataset.d));
- $('sd0').onchange=()=>sharedDates($('sd0').value,$('sd1').value);
- $('sd1').onchange=()=>sharedDates($('sd0').value,$('sd1').value);
  let st;window.addEventListener('resize',()=>{clearTimeout(st);st=setTimeout(()=>{if(SD)drawStock();},150);});}
 // init
 buildCards();buildIndBar();setupSearch();syncInputs();markBtns(732);renderTrend();gauge(b);renderCards(b);applyRanking();
