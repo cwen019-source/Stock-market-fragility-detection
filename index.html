@@ -188,8 +188,10 @@ function syncStockCursor(ds){if(!SD||!SCG)return;const j=scIdxForDate(ds);
  const x=SCG.X(j),y=SCG.Y(SCG.ly[j]);
  $('scx').setAttribute('x1',x);$('scx').setAttribute('x2',x);$('scx').setAttribute('opacity',pinned?'0.6':'0.35');
  $('scd').setAttribute('cx',x);$('scd').setAttribute('cy',y);$('scd').setAttribute('opacity','1');
- const tp=$('sctip');tp.style.opacity='1';tp.innerHTML=(pinned?'📌 ':'')+'<b>'+SD.dates[j]+'</b><br>收盤 '+SD.raw[j];
- let tx=x+12;if(tx>SCG.W-92)tx=x-92;tp.style.left=Math.max(0,tx)+'px';tp.style.top='4px';
+ const tp=$('sctip');tp.style.opacity='1';const pf=v=>(v==null||v<=0)?'–':(v>=100?v.toFixed(0):v.toFixed(1));
+ tp.innerHTML=(pinned?'📌 ':'')+'<b>'+SD.dates[j]+'</b><br>收盤 '+SD.raw[j]+' <span style="color:var(--muted)">(還原'+pf(SD.adj[j])+')</span>'
+  +'<br><span style="color:#2a78d6">月'+pf(SD.ma20?SD.ma20[j]:null)+'</span> <span style="color:#8b5cf6">季'+pf(SD.ma60?SD.ma60[j]:null)+'</span> <span style="color:#0891b2">半年'+pf(SD.ma120?SD.ma120[j]:null)+'</span>';
+ let tx=x+12;if(tx>SCG.W-104)tx=x-104;tp.style.left=Math.max(0,tx)+'px';tp.style.top='4px';
  renderStockCardsAt(j);}
 function hideStockCursor(){if(!SD)return;$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');$('sctip').style.opacity='0';if(SM)renderStockCardsAt(SB);}
 function showAt(i){sel=i;const x=X(i),y=Y(D.comp[i]);
@@ -243,8 +245,13 @@ async function fmFetch(ds,id){const p=new URLSearchParams({dataset:ds,data_id:id
  if(!r.ok)throw new Error('HTTP '+r.status+(r.status==402?'(速率上限,稍後或加 ?token=)':''));return (await r.json()).data||[];}
 function adjClose(rows){rows=rows.filter(r=>+r.close>0).sort((a,b)=>a.date<b.date?-1:1);
  if(rows.length<2)return null;const dates=rows.map(r=>r.date),raw=rows.map(r=>+r.close),vol=rows.map(r=>+r.Trading_Volume||0);
+ const ropen=rows.map(r=>+r.open||0),rhigh=rows.map(r=>+r.max||0),rlow=rows.map(r=>+r.min||0);
  let f=raw[0];const adj=[raw[0]];for(let i=1;i<raw.length;i++){let lr=Math.log(raw[i]/raw[i-1]);if(Math.abs(lr)>0.13)lr=0;f*=Math.exp(lr);adj.push(f);}
- return {dates,raw,adj,vol};}
+ const rt=adj.map((a,i)=>raw[i]>0?a/raw[i]:1);   // 還原比例(套用同一調整因子到 OHLC)
+ const aopen=ropen.map((v,i)=>v>0?v*rt[i]:null),ahigh=rhigh.map((v,i)=>v>0?v*rt[i]:null),alow=rlow.map((v,i)=>v>0?v*rt[i]:null);
+ return {dates,raw,adj,vol,aopen,ahigh,alow};}
+// 簡單移動平均(以還原收盤計算;未滿 n 日為 null)
+function sma(arr,n){const out=new Array(arr.length).fill(null);let s=0;for(let i=0;i<arr.length;i++){const v=arr[i]||0;s+=v;if(i>=n)s-=(arr[i-n]||0);if(i>=n-1)out[i]=s/n;}return out;}
 // 小工具
 function ols3(X,y){const k=X[0].length,A=Array.from({length:k},()=>Array(k).fill(0)),bb=Array(k).fill(0);
  for(let i=0;i<X.length;i++){for(let a=0;a<k;a++){bb[a]+=X[i][a]*y[i];for(let c=0;c<k;c++)A[a][c]+=X[i][a]*X[i][c];}}
@@ -334,6 +341,7 @@ async function doSearch(){const q=$('q').value;const code=resolveCode(q);
  try{const rows=await fmFetch('TaiwanStockPrice',code);
   if(!rows.length){$('qmsg').textContent='查無此檔價格資料(興櫃部分冷門股可能無資料)';$('scwrap').style.display='none';return;}
   SD=adjClose(rows);SD.name=code+' '+nm+(ty?' · '+ty:'');
+  SD.ma20=sma(SD.adj,20);SD.ma60=sma(SD.adj,60);SD.ma120=sma(SD.adj,120);   // 月線/季線/半年線(還原收盤)
   $('sctitle').textContent=SD.name;$('scwrap').style.display='';$('qmsg').textContent='';
   // 對齊到目前脆弱度圖的時間窗(共用時間軸)
   SA=scIdxForDate(D.dates[a]);SB=scIdxForDate(D.dates[b]);
@@ -344,8 +352,13 @@ async function doSearch(){const q=$('q').value;const code=resolveCode(q);
    $('qmsg').textContent='⚠ '+m;}}
 function drawStock(){if(!SD)return;const svg=$('scsvg'),wrap=$('sc'),tip=$('sctip');
  const W=wrap.clientWidth||800,H=210,pl=46,pr=12,pt=12,pb=22,plotW=W-pl-pr,plotH=H-pt-pb;
- const ly=SD.adj.map(x=>Math.log10(x));const win=ly.slice(SA,SB+1);const lo=Math.min(...win),hi=Math.max(...win);
- const span=SB-SA;const X=i=>pl+(span<1?0:(i-SA)/span*plotW),Y=v=>pt+(hi-v)/((hi-lo)||1)*plotH;
+ const ly=SD.adj.map(x=>Math.log10(x));const span=SB-SA;
+ // y 範圍:納入還原 OHLC 高低與三條均線,避免K棒影線/均線被裁掉
+ let vmn=Infinity,vmx=-Infinity;const psh=v=>{if(v!=null&&v>0){if(v<vmn)vmn=v;if(v>vmx)vmx=v;}};
+ for(let i=SA;i<=SB;i++){psh(SD.ahigh[i]!=null?SD.ahigh[i]:SD.adj[i]);psh(SD.alow[i]!=null?SD.alow[i]:SD.adj[i]);psh(SD.ma20[i]);psh(SD.ma60[i]);psh(SD.ma120[i]);}
+ if(!isFinite(vmn)){vmn=Math.min(...SD.adj.slice(SA,SB+1));vmx=Math.max(...SD.adj.slice(SA,SB+1));}
+ const lo=Math.log10(vmn),hi=Math.log10(vmx);
+ const X=i=>pl+(span<1?0:(i-SA)/span*plotW),Y=v=>pt+(hi-v)/((hi-lo)||1)*plotH;const Yl=pv=>Y(Math.log10(pv));
  svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox','0 0 '+W+' '+H);
  let g='';[0,0.25,0.5,0.75,1].forEach(t=>{const lv=lo+(hi-lo)*t,pv=Math.pow(10,lv);
   g+='<line x1="'+pl+'" y1="'+Y(lv)+'" x2="'+(W-pr)+'" y2="'+Y(lv)+'" stroke="var(--border)" stroke-dasharray="3 3"/>'
@@ -358,8 +371,23 @@ function drawStock(){if(!SD)return;const svg=$('scsvg'),wrap=$('sc'),tip=$('scti
   g+='<rect x="'+(X(i)-cw/2).toFixed(1)+'" y="'+pt+'" width="'+Math.max(1,cw+0.6).toFixed(1)+'" height="'+plotH+'" fill="'+col+'" opacity="'+op+'"/>';}
  const showMonth=span<=500;let lastL=null;for(let i=SA;i<=SB;i++){const lab=showMonth?SD.dates[i].slice(0,7):SD.dates[i].slice(0,4);
   if(lab!==lastL){lastL=lab;if(showMonth||(+lab%(span>2600?3:1)==0))g+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+lab+'</text>';}}
- let p='';for(let i=SA;i<=SB;i++)p+=(i==SA?'M':'L')+X(i).toFixed(1)+' '+Y(ly[i]).toFixed(1)+' ';
- g+='<path d="'+p+'" fill="none" stroke="var(--series-1)" stroke-width="1.4"/>';
+ // K線(還原OHLC;台股慣例:收≥開為紅、收<開為綠)。太密(K棒<2.2px)則退回還原收盤線
+ const slot=plotW/Math.max(1,span+1),drawK=slot>=2.2;
+ if(drawK){const bw=Math.max(1,Math.min(9,slot*0.62));
+  for(let i=SA;i<=SB;i++){const o=SD.aopen[i],c=SD.adj[i],h=SD.ahigh[i],l=SD.alow[i];if(!(c>0))continue;
+   const x=X(i),up=(o!=null?c>=o:true),col=up?'var(--red)':'var(--ok)';
+   if(h>0&&l>0)g+='<line x1="'+x.toFixed(1)+'" y1="'+Yl(h).toFixed(1)+'" x2="'+x.toFixed(1)+'" y2="'+Yl(l).toFixed(1)+'" stroke="'+col+'" stroke-width="1"/>';
+   if(o!=null&&o>0){const yo=Yl(o),yc=Yl(c),top=Math.min(yo,yc),ht=Math.max(1,Math.abs(yo-yc));
+    g+='<rect x="'+(x-bw/2).toFixed(1)+'" y="'+top.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+ht.toFixed(1)+'" fill="'+col+'"/>';}}
+ }else{let p='';for(let i=SA;i<=SB;i++)p+=(i==SA?'M':'L')+X(i).toFixed(1)+' '+Y(ly[i]).toFixed(1)+' ';
+  g+='<path d="'+p+'" fill="none" stroke="var(--ts)" stroke-width="1.2" opacity="0.75"/>';}
+ // 均線:月線(20)/季線(60)/半年線(120)
+ function maPath(ma){let p='',on=false;for(let i=SA;i<=SB;i++){const v=ma[i];if(v==null||v<=0){on=false;continue;}p+=(on?'L':'M')+X(i).toFixed(1)+' '+Yl(v).toFixed(1)+' ';on=true;}return p;}
+ const MAS=[[SD.ma20,'#2a78d6','月線20'],[SD.ma60,'#8b5cf6','季線60'],[SD.ma120,'#0891b2','半年線120']];
+ MAS.forEach(m=>{const d=maPath(m[0]);if(d)g+='<path d="'+d+'" fill="none" stroke="'+m[1]+'" stroke-width="1.2" opacity="0.95"/>';});
+ // 圖例
+ let lx=pl+3;MAS.forEach(m=>{g+='<line x1="'+lx+'" y1="'+(pt+7)+'" x2="'+(lx+13)+'" y2="'+(pt+7)+'" stroke="'+m[1]+'" stroke-width="2"/>'
+  +'<text x="'+(lx+16)+'" y="'+(pt+10)+'" font-size="9" fill="var(--muted)">'+m[2]+'</text>';lx+=16+m[2].length*9+16;});
  g+='<line id="scx" y1="'+pt+'" y2="'+(pt+plotH)+'" stroke="var(--tp)" opacity="0"/><circle id="scd" r="3.2" fill="var(--series-1)" opacity="0"/>';
  svg.innerHTML=g;
  $('scstart').textContent=SD.dates[SA];$('scend').textContent=SD.dates[SB];
