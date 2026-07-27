@@ -69,9 +69,9 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
   <span id="qmsg" style="font-size:12px;color:var(--muted)"></span></div>
  <div id="scwrap" style="display:none;margin-top:10px"><div id="sctitle" style="font-size:14px;font-weight:650;margin-bottom:4px"></div>
   <div class="ctrl" id="scranges" style="margin:0 0 6px"><button data-d="244">1年</button><button data-d="732">3年</button><button data-d="1220">5年</button><button data-d="0" class="on">全部</button>
-   <input type="date" id="sd0"><span style="color:var(--muted)">~</span><input type="date" id="sd1"></div>
+   <span style="color:var(--muted);font-size:11px">(日期範圍見下方脆弱度圖,兩圖共用)</span></div>
   <div id="sc" style="position:relative"><svg id="scsvg"></svg><div id="sctip"></div></div>
-  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數刻度);<b>背景=市場高危險區</b>(脆弱度≥75 紅、55–75 橙,與儀表一致);滑鼠移過看收盤</span><span id="scend"></span></div>
+  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數刻度);<b>背景=市場高危險區</b>(脆弱度≥75 紅、55–75 橙,與儀表一致);<b>兩圖共用游標</b>,移過任一圖另一圖同步,點一下可釘選(點兩下取消)</span><span id="scend"></span></div>
   <div id="scsuit" style="font-size:12.5px;margin-top:8px;padding:8px 11px;background:var(--bg);border:1px solid var(--border);border-radius:9px"></div>
   <div id="scstats" class="scstats"></div>
   <div id="scmnote" style="font-size:10.5px;color:var(--muted);margin-top:4px"></div></div></div>
@@ -181,21 +181,37 @@ function renderTrend(){curA=a;curB=b;W=box.clientWidth||800;plotW=W-padL-padR;pl
  if(pinned&&pinIdx>=curA&&pinIdx<=curB)showAt(pinIdx);}
 function idxAt(ev){const rect=svg.getBoundingClientRect();const mx=(ev.touches?ev.touches[0].clientX:ev.clientX)-rect.left;
  let i=curA+Math.round((mx-padL)/plotW*(curB-curA));return Math.max(curA,Math.min(curB,i));}
+let SCG=null;   // 個股圖幾何快照(供跨圖共用游標)
+// 依日期在個股圖畫出同步游標(釘選游標:兩張圖以同一日期對齊)
+function syncStockCursor(ds){if(!SD||!SCG)return;const j=scIdxForDate(ds);
+ if(j<SCG.SA||j>SCG.SB){$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');$('sctip').style.opacity='0';return;}
+ const x=SCG.X(j),y=SCG.Y(SCG.ly[j]);
+ $('scx').setAttribute('x1',x);$('scx').setAttribute('x2',x);$('scx').setAttribute('opacity',pinned?'0.6':'0.35');
+ $('scd').setAttribute('cx',x);$('scd').setAttribute('cy',y);$('scd').setAttribute('opacity','1');
+ const tp=$('sctip');tp.style.opacity='1';tp.innerHTML=(pinned?'📌 ':'')+'<b>'+SD.dates[j]+'</b><br>收盤 '+SD.raw[j];
+ let tx=x+12;if(tx>SCG.W-92)tx=x-92;tp.style.left=Math.max(0,tx)+'px';tp.style.top='4px';
+ renderStockCardsAt(j);}
+function hideStockCursor(){if(!SD)return;$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');$('sctip').style.opacity='0';if(SM)renderStockCardsAt(SB);}
 function showAt(i){sel=i;const x=X(i),y=Y(D.comp[i]);
  $('tcx').setAttribute('x1',x);$('tcx').setAttribute('x2',x);$('tcx').setAttribute('opacity',pinned?'0.6':'0.35');
  $('tcd').setAttribute('cx',x);$('tcd').setAttribute('cy',y);$('tcd').setAttribute('opacity','1');
  const rc=redCount(i);tip.style.opacity='1';
  tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>紅區 '+rc+'/10'+(rc>=REDN?' ⚠':'');
  let tx=x+12;if(tx>W-104)tx=x-104;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';
- $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(再點線圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
- gauge(i);renderCards(i);}
+ $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(移動任一圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
+ gauge(i);renderCards(i);
+ syncStockCursor(D.dates[i]);}   // ← 共用游標:同步個股圖
 function move(ev){if(pinned)return;showAt(idxAt(ev));}
 function leave(){if(pinned){showAt(pinIdx);return;}
  $('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
- sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);}
+ sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);hideStockCursor();}
 function unpin(){pinned=false;pinIdx=null;$('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
- sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);}
+ sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);hideStockCursor();}
 function onClick(ev){const i=idxAt(ev);if(pinned&&Math.abs(i-pinIdx)<=1){unpin();}else{pinned=true;pinIdx=i;showAt(i);}}
+// 由個股圖的滑鼠位置換算共用游標(對映到脆弱度日期,驅動兩圖)
+function stockFragIdx(clientX){const r=$('scsvg').getBoundingClientRect();const g=SCG;if(!g)return null;
+ let j=g.SA+Math.round(((clientX-r.left)-g.pl)/g.plotW*(g.SB-g.SA));j=Math.max(g.SA,Math.min(g.SB,j));
+ const ds=SD.dates[j];const fi=(DPOS[ds]!=null?DPOS[ds]:idxForTs(Date.parse(ds)));return Math.max(curA,Math.min(curB,fi));}
 function syncInputs(){$('d0').value=D.dates[a];$('d1').value=D.dates[b];}
 // ---- 共用時間軸:一組控制同時驅動脆弱度圖與個股圖 ----
 function markBtns(days){document.querySelectorAll('#ranges button,#scranges button').forEach(x=>x.classList.toggle('on',+x.dataset.d===days));}
@@ -204,7 +220,7 @@ function applyWindow(d0,d1){                    // d0,d1:日期字串,兩張圖�
  a=idxForTs(Date.parse(d0));b=idxForTs(Date.parse(d1));sel=b;
  $('d0').value=D.dates[a];$('d1').value=D.dates[b];
  renderTrend();gauge(sel);renderCards(sel);applyRanking();
- if(SD){SA=scIdxForDate(d0);SB=scIdxForDate(d1);$('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];drawStock();}
+ if(SD){SA=scIdxForDate(d0);SB=scIdxForDate(d1);drawStock();}
 }
 function sharedDays(days){b=N-1;a=days<=0?0:Math.max(0,N-days);markBtns(days);applyWindow(D.dates[a],D.dates[b]);}
 function sharedDates(d0,d1){if(!d0||!d1||Date.parse(d0)>=Date.parse(d1))return;clearBtns();applyWindow(d0,d1);}
@@ -321,7 +337,6 @@ async function doSearch(){const q=$('q').value;const code=resolveCode(q);
   $('sctitle').textContent=SD.name;$('scwrap').style.display='';$('qmsg').textContent='';
   // 對齊到目前脆弱度圖的時間窗(共用時間軸)
   SA=scIdxForDate(D.dates[a]);SB=scIdxForDate(D.dates[b]);
-  $('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];
   renderStockMargin(code);drawStock();
  }catch(e){let m=e.message;
    if(location.protocol==='file:')m='此頁是用「檔案(file://)」開啟,瀏覽器會擋住向 FinMind 的跨站抓取。請改用網址開啟(上線到 GitHub Pages/Netlify),或在此資料夾執行 python -m http.server 後開 http://localhost:8000/';
@@ -348,14 +363,15 @@ function drawStock(){if(!SD)return;const svg=$('scsvg'),wrap=$('sc'),tip=$('scti
  g+='<line id="scx" y1="'+pt+'" y2="'+(pt+plotH)+'" stroke="var(--tp)" opacity="0"/><circle id="scd" r="3.2" fill="var(--series-1)" opacity="0"/>';
  svg.innerHTML=g;
  $('scstart').textContent=SD.dates[SA];$('scend').textContent=SD.dates[SB];
- svg.onmousemove=ev=>{const r=svg.getBoundingClientRect();let i=SA+Math.round(((ev.clientX-r.left)-pl)/plotW*span);i=Math.max(SA,Math.min(SB,i));
-  const x=X(i),y=Y(ly[i]);$('scx').setAttribute('x1',x);$('scx').setAttribute('x2',x);$('scx').setAttribute('opacity','0.35');
-  $('scd').setAttribute('cx',x);$('scd').setAttribute('cy',y);$('scd').setAttribute('opacity','1');
-  tip.style.opacity='1';tip.innerHTML='<b>'+SD.dates[i]+'</b><br>收盤 '+SD.raw[i];
-  let tx=x+12;if(tx>W-92)tx=x-92;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';
-  renderStockCardsAt(i);};   // 游標所在時點 → 前推半年/一年重算個股指標卡
- svg.onmouseleave=()=>{$('scx').setAttribute('opacity','0');$('scd').setAttribute('opacity','0');tip.style.opacity='0';renderStockCardsAt(SB);};
- if(SM)renderStockCardsAt(SB);   // 未指向時,卡片對齊目前視窗右緣(SB)
+ SCG={X,Y,ly,SA,SB,W,pl,plotW};   // 幾何快照:供跨圖共用游標定位
+ // 個股圖滑鼠 → 換算共用日期 → 驅動兩圖(釘選游標)
+ svg.onmousemove=ev=>{if(pinned)return;const fi=stockFragIdx(ev.clientX);if(fi!=null)showAt(fi);};
+ svg.onmouseleave=()=>{leave();};
+ svg.onclick=ev=>{const fi=stockFragIdx(ev.clientX);if(fi==null)return;
+  if(pinned&&Math.abs(fi-pinIdx)<=1){unpin();}else{pinned=true;pinIdx=fi;showAt(fi);}};
+ svg.ondblclick=unpin;
+ if(pinned&&pinIdx>=curA&&pinIdx<=curB)syncStockCursor(D.dates[pinIdx]);   // 重繪後保持釘選游標
+ else if(SM)renderStockCardsAt(SB);   // 未指向時,卡片對齊目前視窗右緣(SB)
  updateSuit();}
 function updateSuit(){const el=$('scsuit');if(!el||!SD)return;
  let cs=[],r8=0,tot=0;
@@ -371,10 +387,8 @@ function scIdxForDate(ds){const t=Date.parse(ds);let lo=0,hi=SD.dates.length-1;c
  if(t<=T[0])return 0;if(t>=T[hi])return hi;while(lo<hi){const m=(lo+hi)>>1;if(T[m]<t)lo=m+1;else hi=m;}return lo;}
 function setupSearch(){buildDatalist();$('qbtn').onclick=doSearch;
  $('q').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
- // 個股圖的區間控制 → 走共用時間軸(同步驅動脆弱度圖)
+ // 個股圖的區間鈕 → 走共用時間軸(同步驅動脆弱度圖;日期輸入已統一至脆弱度圖)
  document.querySelectorAll('#scranges button').forEach(btn=>btn.onclick=()=>sharedDays(+btn.dataset.d));
- $('sd0').onchange=()=>sharedDates($('sd0').value,$('sd1').value);
- $('sd1').onchange=()=>sharedDates($('sd0').value,$('sd1').value);
  let st;window.addEventListener('resize',()=>{clearTimeout(st);st=setTimeout(()=>{if(SD)drawStock();},150);});}
 // init
 buildCards();buildIndBar();setupSearch();syncInputs();markBtns(732);renderTrend();gauge(b);renderCards(b);applyRanking();
