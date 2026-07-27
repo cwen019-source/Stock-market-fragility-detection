@@ -2,10 +2,13 @@
 
 兩張儀表板,**台灣時間每個交易日早上 07:50(開盤前)自動更新**:
 
+三頁上方共用分頁列,可直接切換:
+
 | 頁面 | 內容 |
 |---|---|
 | `index.html` | 台股脆弱度(融資餘額 / 三大法人 / 台幣 / 加權指數 + 美股韓股 VIX 外部因素) |
 | `us.html` | 美股脆弱度(**S&P 500 · Nasdaq · 費城半導體 SOX** + FINRA 全市場融資餘額) |
+| `industry_heat.html` | 產業熱度雷達(33 個官方產業別的 **pairwise 相關性**,判斷該選股還是買籃子) |
 
 兩頁互相有切換連結,方法論相同:10 項指標一律轉成 **PIT 擴張百分位**(第 t 日只用當日及以前的資料,
 無前視偏誤),加權合成 0–100 脆弱度;含共用釘選游標、個股 K 線 + 月/季/半年線。純風控壓力計,非投資建議。
@@ -22,7 +25,11 @@
 1. 建一個新的 GitHub repository(Public),把本資料夾所有檔案上傳:
    - 台股:`fragility_dashboard.py`、`index.html`、`fragility_history.csv`
    - 美股:`us_fragility_dashboard.py`、`us.html`、`us_fragility_history.csv`
+   - 產業熱度:`heat_fetch.py`、`industry_heat.py`、`industry_heat.html`、`heat_members.json`
    - 共用:`requirements.txt`、`.github/workflows/daily.yml`
+
+   > `heat_px_cache.json`(約 63MB 的股價快取)**不要進版控**,已列入 `.gitignore`;
+   > CI 每次會重新抓取 548 檔(約 1–2 分鐘)。
 2. **開啟 Pages**:repo → Settings → Pages → Source 選「Deploy from a branch」→ 分支 `main`、資料夾 `/ (root)` → Save。
    稍等一兩分鐘,網址為 `https://<你的帳號>.github.io/<repo名>/`。
 3. **確認 Actions 有寫入權限**:Settings → Actions → General → 「Workflow permissions」選 **Read and write permissions** → Save。
@@ -41,8 +48,8 @@
 - 台灣 = UTC+8 → 台灣 07:50 = UTC 23:50(**前一天**)
 - 星期也要跟著往前挪一天 → UTC 週日~週四 (`0-4`) = **台灣 週一~週五**
 
-台股與美股合併在同一個 job(避免兩個工作流同時 `git push` 打架),任一邊失敗會自動重試 3 次,
-且**不影響另一邊**;兩邊都失敗時 workflow 才會顯示紅字。
+三張表合併在同一個 job(避免多個工作流同時 `git push` 打架),任一張失敗會自動重試 3 次,
+且**不影響其他兩張**;三張都失敗時 workflow 才會顯示紅字。
 
 ## 調整
 - 改觸發時間:編輯 `.github/workflows/daily.yml` 的 `cron`(記得換算 UTC,跨午夜要順便挪星期)。
@@ -75,3 +82,17 @@
 - `industry_returns.json` 已含在 repo,`fragility_dashboard.py` 會自動嵌入;若檔案不存在則自動隱藏此區塊。
 - **每週自動更新**:`.github/workflows/weekly-industry.yml` 每週六重建並提交 `industry_returns.json`(較重,約抓 276 檔;建議設定 `FINMIND_TOKEN` secret)。
 - rank-IC 為描述性統計、樣本有限,**非投資建議**,亦非嚴謹的因子回測(未做 point-in-time / 多重檢定校正)。
+
+---
+
+## 產業熱度雷達(`industry_heat.html`)
+
+以產業內**平均兩兩相關 ρ** 偵測資金主題化。**回測否定了原始假設**:ρ 對未來產業報酬的橫斷面
+rank-IC ≈ 0(未來20日 −0.009 t=−1.25;未來60日 −0.001 t=−0.13),Δρ 甚至微弱負向。
+但 ρ 能預測未來個股離散度(高相關組 1.46 vs 低相關組 1.66),因此正確用法是**兩段式**:
+
+- **要不要參與** → 看動能(近60日籃子報酬,IC +0.051 **t=6.95**)與離散度(IC −0.051 **t=−5.75**)
+- **選股還是買籃子** → 看 ρ(高 ρ = 個股同步、選股空間小)
+
+成分股:每官方產業別先取股號較小者最多 18 檔,再依中位成交值留前 10 檔;非市值加權正式指數。
+IC 效果量小(0.03–0.05),當排序參考而非訊號。**非投資建議。**

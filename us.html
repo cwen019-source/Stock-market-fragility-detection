@@ -55,11 +55,14 @@ th,td{padding:9px 12px;font-size:13px;border-bottom:1px solid var(--border);text
 th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
 .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--series-1);border-radius:8px;padding:12px 15px;margin-top:18px;font-size:12px;color:var(--ts);line-height:1.6}
 details.note summary::-webkit-details-marker{color:var(--muted)}
+.tabs{display:flex;gap:6px;margin:10px 0 4px;flex-wrap:wrap}
+.tabs a{font-size:12.5px;text-decoration:none;color:var(--ts);background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:5px 13px}
+.tabs a.on{background:var(--s1,var(--series-1));color:#fff;border-color:var(--s1,var(--series-1))}
 #th{position:fixed;top:12px;right:12px;background:var(--surface);color:var(--tp);border:1px solid var(--border);border-radius:8px;padding:6px 11px;cursor:pointer}
 </style></head><body><button id="th">◐</button><div class="wrap">
 <h1>美股脆弱度儀表板 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">PIT 無前視偏誤</span></h1>
 <div class="sub">S&amp;P 500 · Nasdaq · 費城半導體(SOX) — 資料 FRED + FINRA + stockanalysis · 更新於 2026-07-24 · 危險度=PIT擴張百分位(只用當日及以前) · 壓力計非擇時工具 · 非投資建議</div>
-<a class="xlink" href="index.html">← 切換到台股脆弱度儀表板</a>
+<nav class="tabs"><a href="index.html">台股脆弱度</a><a href="us.html" class="on">美股脆弱度</a><a href="industry_heat.html">產業熱度雷達</a></nav>
 <div class="hero"><div class="gauge" id="gauge"><div class="inner"><div><div class="num" id="cnum">–</div><div class="lb">脆弱度 / 100</div></div></div></div>
  <div class="txt"><div class="big" id="cjudge">–</div>
  <div class="d">慢層<b>結構脆弱度</b>定槓桿上限,快層<b>觸發</b>(VIX跳升/跌破均線)才真的降到 1x。脆弱但未觸發=不加碼、不出場。</div>
