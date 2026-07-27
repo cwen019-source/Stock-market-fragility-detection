@@ -58,6 +58,18 @@ def fred(series):
     except Exception:
         return pd.Series(dtype=float)
 
+def fetch_gdp_yoy(cap_year):
+    """台灣名目GDP年增率(IMF WEO via DBnomics,年頻)。僅取 <= cap_year 的『已實現』年份,
+    排除 WEO 對未來年份的預測,避免前視偏誤。回傳 {year:int -> yoy%} 或 None(抓取失敗)。"""
+    try:
+        u="https://api.db.nomics.world/v22/series/IMF/WEO:latest/TWN.NGDP?observations=1"
+        j=requests.get(u,timeout=30).json(); s=j["series"]["docs"][0]
+        lvl={int(p):v for p,v in zip(s["period"],s["value"]) if v is not None}
+        yoy={y:(lvl[y]/lvl[y-1]-1)*100 for y in lvl if (y-1) in lvl and lvl[y-1]>0 and y<=cap_year}
+        return yoy or None
+    except Exception:
+        return None
+
 def get_data():
     d={}
     m=fm("TaiwanStockTotalMarginPurchaseShortSale")
@@ -82,6 +94,9 @@ def get_data():
     d["vix"]=fred("VIXCLS")
     d["nasdaq"]=fred("NASDAQCOM")      # 美股(日)
     d["kospi"]=fred("SPASTT01KRM661N") # 韓股(月, OECD)
+    if "idx" in d and len(d["idx"]):
+        d["asof_year"]=int(d["idx"].index[-1].year)
+        d["gdp_yoy"]=fetch_gdp_yoy(d["asof_year"]-1)   # 名目GDP年增率(已實現年份,PIT)
     return d
 
 def compute(d):
@@ -94,9 +109,23 @@ def compute(d):
         R["margin_resid_z"]=dict(val=float(zr.iloc[-1]),series=zr,unit="σ",label="融資超額水位",
             note="剔除指數/量能後,融資多出幾個σ(去趨勢殘差)")
     if len(base)>260:
-        div=(base["margin"].pct_change(244)*100)-(base["idx"].pct_change(244)*100)
-        R["margin_yoy_div"]=dict(val=float(div.iloc[-1]),series=div,unit="pp",label="融資成長背離(YoY)",
-            note="融資年增率 − 指數年增率;正越大=槓桿跑贏價值")
+        m_yoy=base["margin"].pct_change(244)*100
+        gdp=d.get("gdp_yoy")
+        if gdp:                                          # 以名目GDP為錨(去除指數分母污染, PIT 落後一年)
+            gyears=sorted(gdp)
+            vals=[]
+            for y in base.index.year:
+                ks=[k for k in gyears if k<=y-1]         # 只用到該日年份前一年的已實現GDP
+                vals.append(gdp[ks[-1]] if ks else None)
+            gser=pd.Series(vals,index=base.index).astype(float).ffill().bfill()
+            div=m_yoy-gser
+            lbl="融資成長背離(vs名目GDP)"
+            note="融資年增率 − 名目GDP年增率(IMF WEO,年頻·PIT落後);正=槓桿跑贏實體經濟。已去除『用指數當分母』的泡沫污染"
+        else:                                            # 退回:GDP源不可得時用指數
+            div=m_yoy-(base["idx"].pct_change(244)*100)
+            lbl="融資成長背離(vs指數)"
+            note="融資年增率 − 指數年增率(GDP源不可得時退回);正=槓桿跑贏價值"
+        R["margin_yoy_div"]=dict(val=float(div.iloc[-1]),series=div,unit="pp",label=lbl,note=note)
     if len(base)>150:
         roc=base["margin"].pct_change(126)*100
         R["margin_roc"]=dict(val=float(roc.iloc[-1]),series=roc,unit="%",label="融資半年擴張",
@@ -253,8 +282,8 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
 <h1>台股脆弱度儀表板 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">PIT 無前視偏誤</span></h1><div class="sub">資料 FinMind + FRED · 更新於 __ASOF__ · 危險度=PIT擴張百分位(只用當日及以前) · 壓力計非擇時工具 · 非投資建議</div>
 <div class="hero"><div class="gauge" id="gauge"><div class="inner"><div><div class="num" id="cnum">–</div><div class="lb">脆弱度 / 100</div></div></div></div>
  <div class="txt"><div class="big" id="cjudge">–</div>
- <div class="d">分數由下列燈號的歷史百分位加權合成。高≠馬上崩,而是「柴火堆高、系統脆弱」——事前降曝險用,不用來擇時。</div>
- <div class="vd" id="viewdate">滑鼠移過下方線圖 → 各燈號同步顯示當日數值</div>
+ <div class="d">脆弱度為 10 項燈號之 PIT 歷史百分位加權(無前視偏誤)。高分代表系統結構脆弱、槓桿堆疊,屬事前風險預警,非崩跌時點預測——用於降槓桿,不作擇時。</div>
+ <div class="vd" id="viewdate">游標移過線圖即同步各燈號當日數值;點按固定、雙擊解除。</div>
  <div class="vd" id="rednow" style="color:var(--red);font-weight:650"></div></div></div>
 <div class="trend"><div class="th"><span>個股搜尋 — 打代號或名稱看還原股價線圖(上市/上櫃/興櫃)</span></div>
  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -266,7 +295,7 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
   <div class="ctrl" id="scranges" style="margin:0 0 6px"><button data-d="244">1年</button><button data-d="732">3年</button><button data-d="1220">5年</button><button data-d="0" class="on">全部</button>
    <input type="date" id="sd0"><span style="color:var(--muted)">~</span><input type="date" id="sd1"></div>
   <div id="sc" style="position:relative"><svg id="scsvg"></svg><div id="sctip"></div></div>
-  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數刻度,已還原除權息/分割);滑鼠移過看當日收盤</span><span id="scend"></span></div>
+  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數刻度);<b>背景=市場高危險區</b>(脆弱度≥75 紅、55–75 橙,與儀表一致);滑鼠移過看收盤</span><span id="scend"></span></div>
   <div id="scsuit" style="font-size:12.5px;margin-top:8px;padding:8px 11px;background:var(--bg);border:1px solid var(--border);border-radius:9px"></div>
   <div id="scstats" class="scstats"></div>
   <div id="scmnote" style="font-size:10.5px;color:var(--muted);margin-top:4px"></div></div></div>
@@ -285,7 +314,7 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
 <div class="grid" id="grp-external"></div>
 <h2>壓力測試 / 敏感度分析(融資追繳連鎖,示意性)</h2>
 <table><thead><tr><th>情境</th><th>估計平均維持率</th><th>逼近斷頭比例</th><th>潛在追繳部位</th></tr></thead><tbody>__STRESS__</tbody></table>
-<div class="note"><b>方法與限制:</b>各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>與<b>成長率背離(vs 指數)</b>雙軌——刻意<b>不</b>用「融資/指數」比率(指數同步噴高時會被分母污染)。壓力測試假設整體融資維持率約常態(均值160%、斷頭130%),僅為示意非精算。目前融資餘額約 __MARGIN__ 億。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<b>本頁為風險框架,非投資建議。</b></div>
+<div class="note"><b>方法與限制:</b>各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>與<b>成長率背離(vs 名目GDP)</b>雙軌:成長背離改以 <b>IMF WEO 台灣名目GDP 年增率</b>(DBnomics,年頻,僅取已實現年份、PIT 落後)為分母——把「經濟自然成長」放進分母,<b>去除用被炒高的指數當分母的泡沫污染</b>(GDP 源不可得時自動退回指數)。真 GDP 為<b>季頻、落後 1–2 月、會修正</b>,故僅用年頻已實現值當慢速結構性錨,非即時訊號。壓力測試假設整體融資維持率約常態(均值160%、斷頭130%),僅為示意非精算。目前融資餘額約 __MARGIN__ 億。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<b>本頁為風險框架,非投資建議。</b></div>
 </div>
 <script>__APPJS__</script>
 <script>document.getElementById('th').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')=='dark'?'light':'dark');if(window.__redraw)window.__redraw();};
@@ -305,8 +334,11 @@ function fmtVal(v,fmt){if(v==null||isNaN(v))return '–';let s=(+v).toFixed(fmt[
 function redCount(i){let c=0;for(const k of D.order){const dg=D.inds[k].dng[i];if(dg!=null&&dg>=75)c++;}return c;}
 function gauge(i){const c=D.comp[i];$('gauge').style.setProperty('--v',c.toFixed(0));
  $('gauge').style.setProperty('--gc','var(--'+light(c)+')');$('cnum').textContent=c.toFixed(0);
- $('cjudge').textContent='綜合研判:'+(c>=75?'高危(柴火堆頂,宜降曝險)':c>=55?'偏高(留意去槓桿風險)':'中性偏低');
- const rc=redCount(i);$('rednow').textContent=(D.dates[i]===D.dates[b]?'目前 ':D.dates[i]+' ')+rc+'/10 指標在紅區(危險度≥75)'+(rc>=REDN?' ⚠ 高壓叢集(已標記於線圖)':'');}
+ var cj=$('cjudge');
+ if(c>=75){cj.innerHTML='🔴 <b style="color:var(--red)">踩剎車:融資歸零、現股續抱</b>(降槓桿至 ~1x,不強制賣股)';}
+ else if(c>=55){cj.innerHTML='🟡 <b style="color:var(--warn)">減槓桿:融資減半</b>(淨曝險降到 ~1x)';}
+ else{cj.innerHTML='🟢 融資可用(建議淨曝險上限 ~1.5x)';}
+ const rc=redCount(i);$('rednow').textContent=(D.dates[i]===D.dates[b]?'當前 ':D.dates[i]+' ')+rc+'/10 燈號亮紅(危險度≥75)'+(rc>=REDN?'｜達高壓叢集門檻,線圖已標示':'');}
 // ---- cards ----
 function cardHTML(k){const c=D.inds[k];
  return '<div class="card" id="cd-'+k+'"><div class="ct">'+c.label+'</div><div class="cv" id="cv-'+k+'">–</div>'
@@ -427,6 +459,17 @@ function ols3(X,y){const k=X[0].length,A=Array.from({length:k},()=>Array(k).fill
  return bb.map((v,i)=>v/A[i][i]);}
 function pctile(arr,v){const s=arr.filter(x=>x!=null&&!isNaN(x));return s.length?s.filter(x=>x<v).length/s.length*100:null;}
 function stLight(p){return p==null?'':p>=75?'red':p>=55?'warn':'ok';}
+let _txmap=null;
+function txMap(){if(_txmap)return _txmap;_txmap=new Map();const t=D.taiex||{dates:[],close:[]};for(let i=0;i<t.dates.length;i++)_txmap.set(t.dates[i],t.close[i]);return _txmap;}
+function computeBeta(win){
+ if(!SD||!D.taiex||!D.taiex.dates.length)return null;const tm=txMap();const rs=[],rm=[];
+ const start=Math.max(1,SD.dates.length-win-1);
+ for(let i=start;i<SD.dates.length;i++){const m=tm.get(SD.dates[i]),mp=tm.get(SD.dates[i-1]);const sp=SD.adj[i-1],sc=SD.adj[i];
+  if(m==null||mp==null||sp<=0||sc<=0||mp<=0||m<=0)continue;rs.push(Math.log(sc/sp));rm.push(Math.log(m/mp));}
+ if(rs.length<60)return null;
+ const mmn=rm.reduce((a,b)=>a+b,0)/rm.length,smn=rs.reduce((a,b)=>a+b,0)/rs.length;
+ let cov=0,vm=0;for(let i=0;i<rs.length;i++){cov+=(rs[i]-smn)*(rm[i]-mmn);vm+=(rm[i]-mmn)**2;}
+ return vm>0?cov/vm:null;}
 async function renderStockMargin(code){
  const box=$('scstats');box.innerHTML='';$('scmnote').textContent='';
  let rows;try{rows=await fmFetch('TaiwanStockMarginPurchaseShortSale',code);}catch(e){return;}
@@ -456,14 +499,21 @@ async function renderStockMargin(code){
  function tile(label,val,sub,p){const lt=stLight(p);
   return '<div class="stile '+lt+'"><div class="l">'+label+'</div><div class="v">'+val+'</div><div class="s">'+(sub||'')+'</div></div>';}
  const f1=x=>x==null?'–':(x>=0?'+':'')+x.toFixed(1);
+ // 市場 Beta:近252日 個股vs大盤(TAIEX)日報酬迴歸斜率
+ const beta=computeBeta(252);
+ const marketRed=(D.comp[D.comp.length-1]>=75);
+ const priority=(beta!=null&&beta>=1.2)&&(marketRed||(residZ!=null&&residZ>1)||(usage!=null&&usage>=60));
  let html='';
+ html+=tile('市場Beta(1年)',beta==null?'–':beta.toFixed(2),'對大盤敏感度'+(beta!=null&&beta>=1.2?' · 高':''), beta==null?null:Math.min(100,Math.max(0,(beta-0.5)/1.5*100)));
  html+=tile('融資餘額(張)',bal[L]!=null?bal[L].toLocaleString():'–','半年擴張 '+f1(roc[L])+'%',pctile(roc,roc[L]));
  html+=tile('融資成長背離',f1(ydiv[L])+'pp','融資YoY−股價YoY',pctile(ydiv,ydiv[L]));
  html+=tile('融資超額水位',residZ==null?'資料不足':f1(residZ)+'σ','去趨勢殘差',residSeries?pctile(residSeries,residZ):null);
  html+=tile('融資使用率',usage==null?'–':usage.toFixed(0)+'%','餘額/限額',usage);
  html+=tile('券資比',shortR==null?'–':shortR.toFixed(0)+'%','融券/融資',null);
  box.innerHTML=html;
- $('scmnote').textContent='上列為「'+code+'」個股自身融資指標(危險度=該股歷史百分位);融資單位為張。';
+ $('scmnote').innerHTML='上列為「'+code+'」個股自身指標(危險度=該股歷史百分位)。'
+   +(priority?' <b style="color:var(--red)">⚠ 高Beta＋槓桿/估值偏高:系統紅燈時建議「優先對本檔降槓桿」</b>':'')
+   +' Beta 高('+'≥1.2)代表系統去槓桿時本檔跌幅會被放大。';
 }
 let SD=null,SA=0,SB=0;   // 個股資料 + 顯示區間[SA,SB]
 function resolveCode(q){q=q.trim();if(!q)return null;const code=q.split(/\s+/)[0];
@@ -492,6 +542,12 @@ function drawStock(){if(!SD)return;const svg=$('scsvg'),wrap=$('sc'),tip=$('scti
  let g='';[0,0.25,0.5,0.75,1].forEach(t=>{const lv=lo+(hi-lo)*t,pv=Math.pow(10,lv);
   g+='<line x1="'+pl+'" y1="'+Y(lv)+'" x2="'+(W-pr)+'" y2="'+Y(lv)+'" stroke="var(--border)" stroke-dasharray="3 3"/>'
    +'<text x="'+(pl-4)+'" y="'+(Y(lv)+3)+'" font-size="9" fill="var(--muted)" text-anchor="end">'+(pv>=100?pv.toFixed(0):pv.toFixed(1))+'</text>';});
+ // 背景延伸「市場高危險區」到個股圖:合成脆弱度 ≥75 紅、55–75 橙(與儀表燈號一致、共用時間軸)
+ const cw=plotW/Math.max(1,span);
+ for(let i=SA;i<=SB;i++){const di=DPOS[SD.dates[i]];if(di==null)continue;const cp=D.comp[di];
+  const col=cp>=75?'var(--red)':(cp>=55?'var(--warn)':null); if(!col)continue;
+  const op=cp>=75?'0.20':'0.10';
+  g+='<rect x="'+(X(i)-cw/2).toFixed(1)+'" y="'+pt+'" width="'+Math.max(1,cw+0.6).toFixed(1)+'" height="'+plotH+'" fill="'+col+'" opacity="'+op+'"/>';}
  const showMonth=span<=500;let lastL=null;for(let i=SA;i<=SB;i++){const lab=showMonth?SD.dates[i].slice(0,7):SD.dates[i].slice(0,4);
   if(lab!==lastL){lastL=lab;if(showMonth||(+lab%(span>2600?3:1)==0))g+='<text x="'+X(i)+'" y="'+(H-6)+'" font-size="9" fill="var(--muted)" text-anchor="middle">'+lab+'</text>';}}
  let p='';for(let i=SA;i<=SB;i++)p+=(i==SA?'M':'L')+X(i).toFixed(1)+' '+Y(ly[i]).toFixed(1)+' ';
@@ -562,6 +618,12 @@ def main():
         print(f"   已嵌入 {len(st)} 檔代號名錄(供搜尋)")
     except Exception:
         app["stocks"]={}
+    # 嵌入 TAIEX 日收盤(供個股 beta 計算,與脆弱度共用時間軸)
+    try:
+        tx=d["idx"]
+        app["taiex"]={"dates":[str(x.date()) for x in tx.index],"close":[round(float(v),2) for v in tx.values]}
+    except Exception:
+        app["taiex"]={"dates":[],"close":[]}
     comp_now=app["comp"][-1]
     stress_cur,stress_rows=stress_test(d)
     asof=app["dates"][-1]
