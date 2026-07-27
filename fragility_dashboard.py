@@ -133,26 +133,47 @@ def compute(d):
             note="韓股(月)距12月均;過高=韓股過熱(2025–26曾極端槓桿→傳染)。月資料較粗(外部)")
     return R
 
-def danger_ser(k, s):
-    rk=s.rank(pct=True)*100
-    return 100-rk if k in INVERT else rk
+PIT_WARMUP=252   # 擴張百分位暖身期(需至少一年歷史才開始評分)
+
+def pit_pct(vals, invert=False, min_periods=PIT_WARMUP):
+    """PIT 擴張百分位:第 t 日的危險度只用「第 t 日及以前」的分佈計算,絕不偷看未來。
+    取代全樣本 rank(pct=True) —— 徹底消除前視偏誤。"""
+    import bisect
+    out=[]; hist=[]
+    for v in vals:
+        if v is None or (isinstance(v,float) and math.isnan(v)):
+            out.append(None); continue
+        bisect.insort(hist, v)                        # 只累積到今天, 無未來資料
+        if len(hist) < min_periods:
+            out.append(None); continue
+        r = bisect.bisect_right(hist, v)/len(hist)*100.0   # 含今日、不含未來
+        out.append(100.0-r if invert else r)
+    return out
 
 def build_app_data(d, R):
-    """對齊所有指標到指數交易日, 產生 dates / 合成分數 / 每指標(值+危險度) 供前端同步顯示。"""
+    """對齊所有指標到指數交易日, 產生 dates / 合成分數 / 每指標(值+危險度) 供前端同步顯示。
+    危險度一律採 PIT 擴張百分位(只用當日及以前資料), 無前視偏誤。"""
     master=d["idx"].index
     aligned={}; wsum=0.0; dmat=pd.DataFrame(index=master)
     for k,r in R.items():
         s=r["series"]
         if not isinstance(s,pd.Series): continue
         sa=s.reindex(master.union(s.index)).sort_index().ffill().reindex(master)
-        dng=danger_ser(k,sa)
+        dvals=pit_pct(sa.values, invert=(k in INVERT))     # ← PIT 取代全樣本 rank
+        dng=pd.Series(dvals, index=master, dtype="float64")
         aligned[k]=dict(label=r["label"],unit=r["unit"],note=r["note"],fmt=FMT.get(k,[0,1,r["unit"]]),
             group=("內部" if k in INTERNAL else "外部"),
             val=[None if pd.isna(x) else round(float(x),2) for x in sa.values],
-            dng=[None if pd.isna(x) else int(round(float(x))) for x in dng.values])
+            dng=[None if x is None else int(round(x)) for x in dvals])
         w=WEIGHTS.get(k,1.0); dmat[k]=dng*w; wsum+=w
-    comp=(dmat.sum(axis=1)/wsum) if wsum else pd.Series(index=master,dtype=float)
-    mask=comp.notna()
+    cols=list(dmat.columns); wvec=np.array([WEIGHTS.get(k,1.0) for k in cols])
+    present=dmat.notna()
+    wsum_row=(present.values*wvec).sum(axis=1)
+    with np.errstate(invalid='ignore',divide='ignore'):
+        comp_vals=np.nansum(dmat.values,axis=1)/np.where(wsum_row>0,wsum_row,np.nan)
+    need=max(4,int(0.8*len(cols)))                       # 需 ≥80% 指標過暖身才起算
+    comp_vals=np.where(present.sum(axis=1).values>=need, comp_vals, np.nan)
+    comp=pd.Series(comp_vals,index=master); mask=comp.notna()
     dates=[str(x.date()) for x in master[mask]]
     inds={k:{**v,"val":[v["val"][i] for i in range(len(mask)) if mask.iloc[i]],
                     "dng":[v["dng"][i] for i in range(len(mask)) if mask.iloc[i]]} for k,v in aligned.items()}
@@ -174,6 +195,9 @@ def build_html(app, comp_now, asof, stress_cur, stress_rows):
 
 TEMPLATE=r"""<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>台股脆弱度儀表板</title>
+<link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#111110">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="脆弱度"><link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{--bg:#f4f4f2;--surface:#fcfcfb;--border:#e2e2dd;--tp:#0b0b0b;--ts:#52514e;--muted:#8a8981;
  --series-1:#2a78d6;--ok:#0f9d63;--warn:#eda100;--red:#e34948;color-scheme:light}
@@ -226,7 +250,7 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
 .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--series-1);border-radius:8px;padding:12px 15px;margin-top:18px;font-size:12px;color:var(--ts);line-height:1.6}
 #th{position:fixed;top:12px;right:12px;background:var(--surface);color:var(--tp);border:1px solid var(--border);border-radius:8px;padding:6px 11px;cursor:pointer}
 </style></head><body><button id="th">◐</button><div class="wrap">
-<h1>台股脆弱度儀表板</h1><div class="sub">資料 FinMind + FRED · 更新於 __ASOF__ · 壓力計非擇時工具 · 非投資建議</div>
+<h1>台股脆弱度儀表板 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">PIT 無前視偏誤</span></h1><div class="sub">資料 FinMind + FRED · 更新於 __ASOF__ · 危險度=PIT擴張百分位(只用當日及以前) · 壓力計非擇時工具 · 非投資建議</div>
 <div class="hero"><div class="gauge" id="gauge"><div class="inner"><div><div class="num" id="cnum">–</div><div class="lb">脆弱度 / 100</div></div></div></div>
  <div class="txt"><div class="big" id="cjudge">–</div>
  <div class="d">分數由下列燈號的歷史百分位加權合成。高≠馬上崩,而是「柴火堆高、系統脆弱」——事前降曝險用,不用來擇時。</div>
@@ -261,10 +285,11 @@ th{color:var(--muted);font-size:11.5px}td.r{text-align:right;font-variant-numeri
 <div class="grid" id="grp-external"></div>
 <h2>壓力測試 / 敏感度分析(融資追繳連鎖,示意性)</h2>
 <table><thead><tr><th>情境</th><th>估計平均維持率</th><th>逼近斷頭比例</th><th>潛在追繳部位</th></tr></thead><tbody>__STRESS__</tbody></table>
-<div class="note"><b>方法與限制:</b>各指標一律轉成「歷史百分位」再合成。融資背離採<b>去趨勢殘差</b>與<b>成長率背離(vs 指數)</b>雙軌——刻意<b>不</b>用「融資/指數」比率(指數同步噴高時會被分母污染)。壓力測試假設整體融資維持率約常態(均值160%、斷頭130%),僅為示意非精算。目前融資餘額約 __MARGIN__ 億。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<b>本頁為風險框架,非投資建議。</b></div>
+<div class="note"><b>方法與限制:</b>各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>與<b>成長率背離(vs 指數)</b>雙軌——刻意<b>不</b>用「融資/指數」比率(指數同步噴高時會被分母污染)。壓力測試假設整體融資維持率約常態(均值160%、斷頭130%),僅為示意非精算。目前融資餘額約 __MARGIN__ 億。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<b>本頁為風險框架,非投資建議。</b></div>
 </div>
 <script>__APPJS__</script>
-<script>document.getElementById('th').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')=='dark'?'light':'dark');if(window.__redraw)window.__redraw();};</script>
+<script>document.getElementById('th').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')=='dark'?'light':'dark');if(window.__redraw)window.__redraw();};
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('service-worker.js').catch(()=>{}));}</script>
 </body></html>"""
 
 APP_JS=r"""
