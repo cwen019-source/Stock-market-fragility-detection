@@ -425,16 +425,23 @@ function leave(){if(pinned){showAt(pinIdx);return;}
 function unpin(){pinned=false;pinIdx=null;$('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
  sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);}
 function onClick(ev){const i=idxAt(ev);if(pinned&&Math.abs(i-pinIdx)<=1){unpin();}else{pinned=true;pinIdx=i;showAt(i);}}
-function setRange(days){a=days<=0?0:Math.max(0,N-days);b=N-1;sel=b;syncInputs();redraw();}
 function syncInputs(){$('d0').value=D.dates[a];$('d1').value=D.dates[b];}
-function redraw(){renderTrend();gauge(sel);renderCards(sel);$('viewdate').textContent='最新('+D.dates[b]+')';
- [...document.querySelectorAll('#ranges button')].forEach(x=>x.classList.remove('on'));applyRanking();}
-window.__redraw=redraw;
-// events
-document.querySelectorAll('#ranges button').forEach(btn=>btn.onclick=()=>{setRange(+btn.dataset.d);btn.classList.add('on');});
-function fromInputs(){const t0=Date.parse($('d0').value),t1=Date.parse($('d1').value);
- if(isNaN(t0)||isNaN(t1)||t0>=t1)return;a=idxForTs(t0);b=idxForTs(t1);sel=b;redraw();}
-$('d0').onchange=fromInputs;$('d1').onchange=fromInputs;
+// ---- 共用時間軸:一組控制同時驅動脆弱度圖與個股圖 ----
+function markBtns(days){document.querySelectorAll('#ranges button,#scranges button').forEach(x=>x.classList.toggle('on',+x.dataset.d===days));}
+function clearBtns(){document.querySelectorAll('#ranges button,#scranges button').forEach(x=>x.classList.remove('on'));}
+function applyWindow(d0,d1){                    // d0,d1:日期字串,兩張圖同步套用
+ a=idxForTs(Date.parse(d0));b=idxForTs(Date.parse(d1));sel=b;
+ $('d0').value=D.dates[a];$('d1').value=D.dates[b];
+ renderTrend();gauge(sel);renderCards(sel);applyRanking();
+ if(SD){SA=scIdxForDate(d0);SB=scIdxForDate(d1);$('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];drawStock();}
+}
+function sharedDays(days){b=N-1;a=days<=0?0:Math.max(0,N-days);markBtns(days);applyWindow(D.dates[a],D.dates[b]);}
+function sharedDates(d0,d1){if(!d0||!d1||Date.parse(d0)>=Date.parse(d1))return;clearBtns();applyWindow(d0,d1);}
+window.__redraw=function(){renderTrend();if(SD)drawStock();gauge(sel);renderCards(sel);applyRanking();};
+// events(脆弱度圖的控制)
+document.querySelectorAll('#ranges button').forEach(btn=>btn.onclick=()=>sharedDays(+btn.dataset.d));
+$('d0').onchange=()=>sharedDates($('d0').value,$('d1').value);
+$('d1').onchange=()=>sharedDates($('d0').value,$('d1').value);
 svg.addEventListener('mousemove',move);svg.addEventListener('mouseleave',leave);
 svg.addEventListener('click',onClick);svg.addEventListener('dblclick',unpin);
 svg.addEventListener('touchmove',e=>move(e),{passive:true});
@@ -527,9 +534,10 @@ async function doSearch(){const q=$('q').value;const code=resolveCode(q);
   if(!rows.length){$('qmsg').textContent='查無此檔價格資料(興櫃部分冷門股可能無資料)';$('scwrap').style.display='none';return;}
   SD=adjClose(rows);SD.name=code+' '+nm+(ty?' · '+ty:'');
   $('sctitle').textContent=SD.name;$('scwrap').style.display='';$('qmsg').textContent='';
-  SA=0;SB=SD.dates.length-1;$('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];
-  document.querySelectorAll('#scranges button').forEach(x=>x.classList.toggle('on',x.dataset.d==='0'));
-  drawStock();renderStockMargin(code);
+  // 對齊到目前脆弱度圖的時間窗(共用時間軸)
+  SA=scIdxForDate(D.dates[a]);SB=scIdxForDate(D.dates[b]);
+  $('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];
+  renderStockMargin(code);drawStock();
  }catch(e){let m=e.message;
    if(location.protocol==='file:')m='此頁是用「檔案(file://)」開啟,瀏覽器會擋住向 FinMind 的跨站抓取。請改用網址開啟(上線到 GitHub Pages/Netlify),或在此資料夾執行 python -m http.server 後開 http://localhost:8000/';
    else if(/fetch/i.test(m))m='抓取失敗——可能是網路、廣告封鎖擴充套件擋了 api.finmindtrade.com,或速率上限(可加 ?token=)';
@@ -576,17 +584,13 @@ function scIdxForDate(ds){const t=Date.parse(ds);let lo=0,hi=SD.dates.length-1;c
  if(t<=T[0])return 0;if(t>=T[hi])return hi;while(lo<hi){const m=(lo+hi)>>1;if(T[m]<t)lo=m+1;else hi=m;}return lo;}
 function setupSearch(){buildDatalist();$('qbtn').onclick=doSearch;
  $('q').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
- document.querySelectorAll('#scranges button').forEach(btn=>btn.onclick=()=>{if(!SD)return;const d=+btn.dataset.d;
-  SA=d<=0?0:Math.max(0,SD.dates.length-1-d);SB=SD.dates.length-1;
-  document.querySelectorAll('#scranges button').forEach(x=>x.classList.toggle('on',x===btn));
-  $('sd0').value=SD.dates[SA];$('sd1').value=SD.dates[SB];drawStock();});
- function fromSD(){if(!SD)return;const t0=Date.parse($('sd0').value),t1=Date.parse($('sd1').value);if(isNaN(t0)||isNaN(t1)||t0>=t1)return;
-  SA=scIdxForDate($('sd0').value);SB=scIdxForDate($('sd1').value);
-  document.querySelectorAll('#scranges button').forEach(x=>x.classList.remove('on'));drawStock();}
- $('sd0').onchange=fromSD;$('sd1').onchange=fromSD;
+ // 個股圖的區間控制 → 走共用時間軸(同步驅動脆弱度圖)
+ document.querySelectorAll('#scranges button').forEach(btn=>btn.onclick=()=>sharedDays(+btn.dataset.d));
+ $('sd0').onchange=()=>sharedDates($('sd0').value,$('sd1').value);
+ $('sd1').onchange=()=>sharedDates($('sd0').value,$('sd1').value);
  let st;window.addEventListener('resize',()=>{clearTimeout(st);st=setTimeout(()=>{if(SD)drawStock();},150);});}
 // init
-buildCards();buildIndBar();setupSearch();syncInputs();renderTrend();gauge(b);renderCards(b);applyRanking();
+buildCards();buildIndBar();setupSearch();syncInputs();markBtns(732);renderTrend();gauge(b);renderCards(b);applyRanking();
 """
 
 def main():
