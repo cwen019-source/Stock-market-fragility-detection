@@ -37,7 +37,7 @@ details summary{cursor:pointer;font-weight:650}
 .kpi div{font-size:11.5px;color:var(--ts)}.kpi b{font-size:15px;color:var(--tp);display:block;font-variant-numeric:tabular-nums}
 </style></head><body><button id="th">◐</button><div class="wrap">
 <h1>台股產業熱度雷達 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">pairwise 相關性</span></h1>
-<nav class="tabs"><a href="index.html">台股脆弱度</a><a href="us.html">美股脆弱度</a><a href="industry_heat.html" class="on">產業熱度雷達</a></nav>
+<nav class="tabs"><a href="index.html">台股脆弱度</a><a href="us.html">美股脆弱度</a><a href="industry_heat.html" class="on">產業熱度雷達</a><a href="asset_pricing.html">資產定價實驗室</a></nav>
 <div class="sub">滾動 <span id="wlab"></span> 日視窗 · PIT 無前視 · 非投資建議</div>
 <div class="card" style="border-left:3px solid var(--s1)"><b style="font-size:13px">先看這個:相關性能回答什麼、不能回答什麼</b><div class="note" style="margin-top:6px">我用 33 個產業、320 檔個股、5299 個交易日回測後發現:<br>❌ <b>相關度 ρ 無法預測產業漲跌</b> — 橫斷面 rank-IC 約 0(未來20日 −0.009,t=−1.25;未來60日 −0.001,t=−0.13),ρ 的變化 Δρ 甚至是<b>微弱負向</b>(t=−1.9)。<b>「相關性上升 = 主題成形 = 接下來會漲」這個直覺,資料不支持。</b><br>✅ <b>相關度能預測「選股還值不值得」</b> — 高相關組的未來60日個股報酬離散度 <b>1.46</b>,低相關組 <b>1.66</b>。族群越同步,個股差異越小,<b>選股能賺到的超額報酬越有限</b>。<br>✅ <b>真正能預測報酬的是動能與離散度</b> — 近60日報酬 IC +0.051(<b>t=6.95</b>)、離散度 IC −0.051(<b>t=−5.75</b>)。<br><br>所以這張表的正確用法是<b>兩段式</b>:先用<b>動能</b>決定「參與哪個產業」,再用<b>相關度</b>決定「用選股還是買籃子去表達」。效果量都不大(IC 0.03–0.05),請當成排序參考而非訊號。</div></div>
 
