@@ -64,8 +64,18 @@ def main(max_passes=60):
     got = seed_from_daily(cache)
     if got: save_cache(cache)
     print(f"全市場 {len(need)} 檔 / 已快取 {len(cache)}(自日頻沿用 {got})", flush=True)
+    # 月頻資料:上個月底之後就該有新的一筆,否則視為過期需重抓
+    import datetime as _dt
+    _t = _dt.date.today()
+    _prev = (_t.replace(day=1) - _dt.timedelta(days=1)).strftime("%Y-%m")
+    def is_stale(sid):
+        d = cache.get(sid)
+        if d is None: return True
+        m = d.get("m") or []
+        if not m: return False                 # 已知無資料者不重試
+        return m[-1] < _prev                   # 最後一個月早於上月 -> 重抓
     for p in range(max_passes):
-        todo = [s for s in need if s not in cache]
+        todo = [s for s in need if is_stale(s)]
         print(f"[pass {p}] 待抓 {len(todo)}", flush=True)
         if not todo:
             print("=== 全數完成 ===", flush=True); break
