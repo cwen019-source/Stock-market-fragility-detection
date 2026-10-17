@@ -7,7 +7,7 @@ import os, json
 from collections import defaultdict
 import pandas as pd, numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from screener import fetch, adj_close, _lock
+from screener import fetch, adj_close, extend_adj, _lock
 
 CACHE="industry_px_cache.json"
 
@@ -40,9 +40,19 @@ def main():
     sel=members()
     need=sorted({s for ids in sel.values() for s in ids})
     cache=load_cache()
-    todo=[s for s in need if s not in cache]
-    print(f"產業 {len(sel)} 個, 需個股 {len(need)}, 已快取 {len(cache)}, 待抓 {len(todo)}")
+    stale_before=pd.Timestamp.today().normalize()-pd.Timedelta(days=4)
+    todo=[s for s in need if s not in cache or cache[s].index[-1]<stale_before]   # 新股 + 過舊者
+    print(f"產業 {len(sel)} 個, 需個股 {len(need)}, 已快取 {len(cache)}, 待抓/更新 {len(todo)}")
     def work(sid):
+        old=cache.get(sid)
+        if old is not None and len(old):
+            start=(old.index[-1]-pd.Timedelta(days=10)).date().isoformat()
+            pr=fetch("TaiwanStockPrice",sid,start=start)
+            if pr is None: return sid,None,"rate"
+            ext=extend_adj([str(d.date()) for d in old.index],list(old.values),pr) if pr else ([],[])
+            if ext is not None:
+                add=pd.Series(ext[1],index=pd.to_datetime(ext[0]))
+                return sid,pd.concat([old,add]),"ok"
         pr=fetch("TaiwanStockPrice",sid)
         if pr is None: return sid,None,"rate"
         if not pr: return sid,None,"empty"

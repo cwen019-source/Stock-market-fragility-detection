@@ -1,2 +1,3 @@
-date,composite,margin_resid_z,margin_yoy_div,lev_intensity,vix_level,vix_spike,foreign_flow,fx_pressure,trend_health,margin_roc
-2026-07-24,88.8,1.691,67.077,,18.7,1.97,-8045.067,1.582,32.628,61.873
+date,composite,margin_resid_z,margin_yoy_div,lev_intensity,vix_level,vix_spike,foreign_flow,fx_pressure,trend_health,margin_roc,us_nasdaq,kr_bubble
+2026-07-24,88.8,1.691,67.077,,18.7,1.97,-8045.067,1.582,32.628,61.873,,
+2026-10-16,87.8,1.802,129.78,,16.46,1.05,-4657.049,1.536,24.242,55.096,7.256,17.017

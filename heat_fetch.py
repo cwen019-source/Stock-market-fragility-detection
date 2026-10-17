@@ -6,7 +6,7 @@
 import os, json, time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from screener import fetch, adj_close, _lock
+from screener import fetch, adj_close, extend_adj, out_of_time, _lock
 
 CACHE = "heat_px_cache.json"
 PER_IND = 18          # 每產業先抓這麼多檔(之後再依成交值留前10)
@@ -69,7 +69,7 @@ def seed_from_theme_cache(cache):
             n += 1
     return n
 
-def work(sid):
+def _full(sid):
     rows = fetch("TaiwanStockPrice", sid)
     if rows is None:
         return sid, None, "rate"
@@ -85,6 +85,21 @@ def work(sid):
     return sid, {"idx": [str(d.date()) for d in pd.to_datetime(s.index)],
                  "val": [round(float(x), 4) for x in s.values],
                  "tv":  [round(float(x) / 1e6, 2) for x in tv.values]}, "ok"
+
+def work(sid, cached=None):
+    """有快取 → 只抓最後一筆之前 10 天起的增量(資料量小很多);銜接不上才全量重抓。"""
+    if cached and cached.get("idx") and cached.get("tv") is not None:
+        start = (pd.Timestamp(cached["idx"][-1]) - pd.Timedelta(days=10)).date().isoformat()
+        rows = fetch("TaiwanStockPrice", sid, start=start)
+        if rows is None:
+            return sid, None, "rate"
+        ext = extend_adj(cached["idx"], cached["val"], rows) if rows else ([], [])
+        if ext is not None:
+            nidx, nval = ext
+            money = {str(r["date"])[:10]: float(r.get("Trading_money") or 0) for r in rows}
+            return sid, {"idx": cached["idx"] + nidx, "val": cached["val"] + nval,
+                         "tv": cached["tv"] + [round(money.get(d, 0) / 1e6, 2) for d in nidx]}, "ok"
+    return _full(sid)
 
 def main(max_passes=40):
     sel = pick_universe()
@@ -104,15 +119,19 @@ def main(max_passes=40):
         idx = d.get("idx") or []
         if not idx: return False              # 已知無資料者不重試
         return idx[-1] < stale_before         # 最後一筆過舊 -> 重抓
+    done = set()     # 本次執行已處理過的(停牌/下市的不會無限重抓)
     for p in range(max_passes):
-        todo = [s for s in need if is_stale(s)]
+        todo = [s for s in need if s not in done and is_stale(s)]
         print(f"[pass {p}] 待抓 {len(todo)}", flush=True)
         if not todo:
             print("=== 全數完成 ===", flush=True)
             break
+        if out_of_time():
+            print("=== 時間預算用完,沿用既有快取 ===", flush=True)
+            break
         ok = rate = 0
         with ThreadPoolExecutor(max_workers=3) as ex:
-            futs = {ex.submit(work, s): s for s in todo}
+            futs = {ex.submit(work, s, cache.get(s)): s for s in todo}
             for f in as_completed(futs):
                 try:
                     sid, data, st = f.result()
@@ -121,7 +140,10 @@ def main(max_passes=40):
                 if st == "rate":
                     rate += 1
                     continue
+                done.add(sid)
                 if data is None:
+                    if cache.get(sid, {}).get("val"):
+                        continue                    # 暫時抓不到 → 保留舊資料,不覆蓋成空
                     with _lock:
                         cache[sid] = {"idx": [], "val": [], "tv": []}   # 記為已處理的空檔
                     continue
@@ -133,7 +155,7 @@ def main(max_passes=40):
                     print(f"   已抓 {ok} / 本回合 {len(todo)}(速率限制 {rate})", flush=True)
         save_cache(cache)
         print(f"[pass {p}] 完成 {ok} 檔, 速率限制 {rate} 次", flush=True)
-        if rate:
+        if rate and not out_of_time():
             time.sleep(90)
     save_cache(cache)
     print(f"快取共 {len([k for k,v in cache.items() if v.get('val')])} 檔有效股價", flush=True)

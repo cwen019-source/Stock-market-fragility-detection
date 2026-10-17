@@ -215,7 +215,7 @@ def main():
     print("四象限未來60日報酬:", json.dumps(val[1], ensure_ascii=False))
     print("高/低相關 → 未來離散度:", val[2])
     payload = build_payload(M, master, inds, names, val)
-    open(OUT, "w").write(HTML.replace("__DATA__", json.dumps(payload, ensure_ascii=False)))
+    open(OUT, "w").write(HTML.replace("__DATA__", json.dumps(payload, ensure_ascii=False,separators=(",",":"))))
     print(f"OK → {OUT}")
 
 HTML = r"""<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8">

@@ -8,7 +8,7 @@
 import os, json, time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from screener import fetch, adj_close, _lock
+from screener import fetch, adj_close, out_of_time, _lock
 
 CACHE = "ap_px_cache.json"
 
@@ -74,8 +74,11 @@ def main(max_passes=60):
         m = d.get("m") or []
         if not m: return False                 # 已知無資料者不重試
         return m[-1] < _prev                   # 最後一個月早於上月 -> 重抓
+    done = set()
     for p in range(max_passes):
-        todo = [s for s in need if is_stale(s)]
+        todo = [s for s in need if s not in done and is_stale(s)]
+        if todo and out_of_time():
+            print("=== 時間預算用完,沿用既有快取 ===", flush=True); break
         print(f"[pass {p}] 待抓 {len(todo)}", flush=True)
         if not todo:
             print("=== 全數完成 ===", flush=True); break
@@ -86,13 +89,15 @@ def main(max_passes=60):
                 try: sid, data, st = f.result()
                 except Exception: continue
                 if st == "rate": rate += 1; continue
+                done.add(sid)
+                if not data and cache.get(sid, {}).get("px"): continue   # 保留舊資料
                 with _lock: cache[sid] = data
                 ok += 1
                 if ok % 100 == 0:
                     save_cache(cache); print(f"   {ok}/{len(todo)}(限制 {rate})", flush=True)
         save_cache(cache)
         print(f"[pass {p}] 完成 {ok}, 速率限制 {rate}", flush=True)
-        if rate: time.sleep(150)
+        if rate and not out_of_time(): time.sleep(150)
     save_cache(cache)
     print(f"完成: {len([1 for v in cache.values() if v.get('px')])} 檔月頻股價", flush=True)
 

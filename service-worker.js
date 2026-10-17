@@ -1,18 +1,30 @@
-// 台股脆弱度儀表板 PWA service worker
-// 策略:本站資源 network-first(每次拿最新,離線時退回快取);FinMind/FRED 不攔截(即時抓)
-const CACHE = 'tw-fragility-v1';
-const ASSETS = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+// 脆弱度儀表板 PWA service worker
+// 策略:本站頁面 network-first 並強制向伺服器重新驗證(拿得到就一定是最新,離線才退回快取);
+//      version.json 永遠走網路不快取;FinMind/FRED/stockanalysis 等跨站請求不攔截(即時抓)。
+const CACHE = 'fragility-v2';
+const SHELL = ['./', 'index.html', 'us.html', 'autoupdate.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
+    .then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
-  const u = new URL(e.request.url);
-  if (u.origin !== location.origin) return;                 // 跨站(FinMind/FRED)→ 走網路,即時資料
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const u = new URL(req.url);
+  if (u.origin !== location.origin) return;                  // 跨站 → 走網路
+  if (u.pathname.endsWith('/version.json')) return;          // 版本檔 → 永遠走網路
+  const key = u.origin + u.pathname;                         // 忽略 ?_v= / ?v= 之類的查詢字串
   e.respondWith(
-    fetch(e.request).then(r => { const cp = r.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); return r; })
-      .catch(() => caches.match(e.request).then(m => m || caches.match('index.html')))
+    fetch(req, { cache: 'no-cache' })
+      .then(r => {
+        if (r.ok) { const cp = r.clone(); caches.open(CACHE).then(c => c.put(key, cp)); }
+        return r;
+      })
+      .catch(() => caches.match(key).then(m => m || (req.mode === 'navigate' ? caches.match(u.origin + u.pathname.replace(/[^/]*$/, '') + 'index.html') : undefined))
+        .then(m => m || Response.error()))
   );
 });

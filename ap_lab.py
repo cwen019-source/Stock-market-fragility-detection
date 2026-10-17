@@ -61,7 +61,7 @@ def build_payload():
         ep = last(eps)
         stocks[sid] = {
             "n": names.get(sid, sid), "ind": inds.get(sid, ""),
-            "r": [None if pd.isna(x) else round(float(x), 5) for x in r.values],
+            "r": [None if pd.isna(x) else round(float(x), 4) for x in r.values],
             "p": round(p0, 2),
             "bv": None if bvps is None else round(bvps, 3),
             "pb": None if pb is None else round(pb, 3),
@@ -132,7 +132,7 @@ def validate(fac, R, stocks):
 def main():
     p = build_payload()
     html = open("ap_template.html").read() if False else HTML
-    open(OUT, "w").write(html.replace("__DATA__", json.dumps(p, ensure_ascii=False)))
+    open(OUT, "w").write(html.replace("__DATA__", json.dumps(p, ensure_ascii=False,separators=(",",":"))))
     import os
     print(f"OK → {OUT}  ({os.path.getsize(OUT)/1048576:.1f} MB)")
     print("α 預測未來12個月報酬的 rank-IC:", json.dumps(p["val"], ensure_ascii=False))

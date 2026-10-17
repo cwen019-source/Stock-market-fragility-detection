@@ -26,7 +26,17 @@ import requests, pandas as pd, numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 API = "https://api.finmindtrade.com/api/v4/data"
-START, END = "2005-01-01", "2026-07-24"
+import datetime as _dt
+# END 預設為今天(原本寫死 2026-07-24 → 每天重跑也永遠停在那天)。可用環境變數固定回測截止日。
+START = os.environ.get("FM_START", "2005-01-01")
+END   = os.environ.get("FM_END", "") or _dt.date.today().isoformat()
+TOKEN = os.environ.get("FINMIND_TOKEN", "")
+# 時間預算(分鐘):CI 用來避免被速率限制卡住整個 job;0 = 不限
+_BUDGET = float(os.environ.get("FETCH_BUDGET_MIN", "0") or 0)
+_DEADLINE = time.time() + _BUDGET*60 if _BUDGET > 0 else None
+
+def out_of_time():
+    return _DEADLINE is not None and time.time() > _DEADLINE
 
 # ---- 可調參數 --------------------------------------------------------------
 PE_TH    = 60      # 本益比「超高」門檻
@@ -38,14 +48,19 @@ WORKERS  = 3
 # ---------------------------------------------------------------------------
 
 _session = requests.Session()
+if TOKEN:
+    _session.headers["Authorization"] = f"Bearer {TOKEN}"
 _lock = threading.Lock()
 
-def fetch(dataset, sid, retries=3):
-    """單檔抓取。回傳 list(可能為空)=成功; None=遇速率限制(本回合放棄, 下回合重試)。"""
+def fetch(dataset, sid, retries=3, start=None):
+    """單檔抓取。回傳 list(可能為空)=成功; None=遇速率限制或時間預算用完(本回合放棄)。
+    start: 只抓此日之後(增量更新用),預設 START。"""
+    if out_of_time():
+        return None
     for a in range(retries):
         try:
             r = _session.get(API, params={"dataset":dataset,"data_id":sid,
-                                          "start_date":START,"end_date":END}, timeout=60)
+                                          "start_date":start or START,"end_date":END}, timeout=60)
             if r.status_code == 200:
                 return r.json().get("data", [])
             msg = ""
@@ -58,18 +73,31 @@ def fetch(dataset, sid, retries=3):
             time.sleep(2*(a+1))      # 僅網路例外才短暫重試
     return None
 
-def adj_close(rows):
+def adj_close(rows, min_len=60):
     p = pd.DataFrame(rows)
     if not len(p): return None
     p['date']  = pd.to_datetime(p['date'])
     p['close'] = pd.to_numeric(p['close'], errors='coerce')
     p = p[p['close']>0].sort_values('date').reset_index(drop=True)
-    if len(p) < 60: return None
+    if len(p) < min_len: return None
     logr = np.log(p['close']/p['close'].shift(1))
     ca   = logr.abs() > CA_GAP                     # 公司行為 / 壞資料
     real = logr.where(~ca, 0.0).fillna(0.0)
     p['adj'] = p['close'].iloc[0]*np.exp(real.cumsum())
     return p.set_index('date')['adj']
+
+def extend_adj(idx, val, rows):
+    """增量更新:把新抓的少量日資料(rows,需與快取重疊至少 1 個交易日)接到既有還原價序列後面。
+    以重疊日把新視窗的還原價等比縮放到快取的尺度,公司行為跳空規則與 adj_close 相同。
+    回傳 (新增日期 list, 新增還原價 list, 對應 rows 的日期→Trading_money) 或 None(無法銜接→需全量重抓)。"""
+    if not idx or not rows: return None
+    s = adj_close(rows, min_len=2)
+    if s is None: return None
+    old_last = pd.Timestamp(idx[-1])
+    if old_last not in s.index: return None          # 沒有重疊日 → 無法安全銜接
+    scale = val[-1] / float(s.loc[old_last])
+    new = s[s.index > old_last] * scale
+    return [str(d.date()) for d in new.index], [round(float(x), 4) for x in new.values]
 
 def find_episodes(v):
     """回傳 [(peak_idx, trough_idx, recovered_bool)] , 崩跌後重置以偵測多次泡沫。"""

@@ -10,7 +10,7 @@
 import os, json, time, sys
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from screener import fetch, _lock
+from screener import fetch, out_of_time, _lock
 
 CACHE = "ap_fund_cache.json"
 FS_KEEP = {"EPS", "Revenue", "GrossProfit", "OperatingIncome", "IncomeAfterTaxes",
@@ -76,8 +76,16 @@ def main(max_passes=40):
     need = sorted({u["stock_id"] for u in uni})          # 全市場 2145 檔
     cache = load_cache()
     print(f"需 {len(need)} 檔基本面 / 已快取 {len(cache)}", flush=True)
+    max_age = float(os.environ.get("FUND_MAX_AGE_DAYS", "100"))   # 基本面約季更 → 預設 100 天重抓一次
+    now = time.time()
+    def is_stale(sid):
+        d = cache.get(sid)
+        return d is None or now - d.get("_t", 0) > max_age*86400
+    done = set()
     for p in range(max_passes):
-        todo = [s for s in need if s not in cache]
+        todo = [s for s in need if s not in done and is_stale(s)]
+        if todo and out_of_time():
+            print("=== 時間預算用完,沿用既有快取 ===", flush=True); break
         print(f"[pass {p}] 待抓 {len(todo)}", flush=True)
         if not todo:
             print("=== 全數完成 ===", flush=True); break
@@ -88,13 +96,15 @@ def main(max_passes=40):
                 try: sid, data, st = f.result()
                 except Exception: continue
                 if st == "rate": rate += 1; continue
-                with _lock: cache[sid] = data or {}
+                done.add(sid)
+                if not data and cache.get(sid): continue                 # 保留舊資料
+                with _lock: cache[sid] = {**(data or {}), "_t": now}
                 ok += 1
                 if ok % 50 == 0:
                     save_cache(cache); print(f"   已抓 {ok}/{len(todo)}(速率限制 {rate})", flush=True)
         save_cache(cache)
         print(f"[pass {p}] 完成 {ok}, 速率限制 {rate}", flush=True)
-        if rate: time.sleep(150)
+        if rate and not out_of_time(): time.sleep(150)
     save_cache(cache)
     n_val = len([1 for v in cache.values() if v.get("val")])
     n_fs  = len([1 for v in cache.values() if v.get("fs")])

@@ -24,6 +24,8 @@ OUT_HTML=os.environ.get("US_OUT_HTML","us.html")
 HIST_CSV="us_fragility_history.csv"
 START="2012-01-01"
 UA={"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+# FRED / 世界銀行的防爬蟲會擋「自稱 Chrome 但不像 Chrome」的請求(直接卡到逾時)→ 不偽裝
+API_UA={}   # 用 requests 預設 UA(實測最穩定)
 
 INVERT={"vix_level","nfci","hy_oas","credit_env"}    # 越低越危險(自滿 / 信用過鬆)
 # ── 雙層架構(2026-07 依回測改版,與台股版一致)────────────────────────
@@ -90,7 +92,7 @@ def fred(series, cosd=START):
     for attempt in range(3):
         try:
             r=requests.get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}&cosd={cosd}",
-                           headers=UA,timeout=(10,25))
+                           headers=API_UA,timeout=(10,25))
             df=pd.read_csv(io.StringIO(r.text)); df.columns=["date","val"]
             df["date"]=pd.to_datetime(df["date"]); df["val"]=pd.to_numeric(df["val"],errors="coerce")
             s=df.dropna().set_index("date")["val"]
@@ -185,7 +187,7 @@ def worldbank_gdp_yoy(cap_year):
         if _cache_fresh(p): j=json.load(open(p)); _log("   [cache] WorldBank GDP")
         else:
             r=requests.get("https://api.worldbank.org/v2/country/US/indicator/NY.GDP.MKTP.CD?format=json&per_page=80",
-                           headers=UA,timeout=(10,30)); j=r.json()
+                           headers=API_UA,timeout=(10,30)); j=r.json()
             json.dump(j,open(p,"w")); _log("   [net]   WorldBank GDP")
         lvl={int(x["date"]):float(x["value"]) for x in j[1] if x.get("value") is not None}
         return {y:(lvl[y]/lvl[y-1]-1)*100 for y in lvl if (y-1) in lvl and lvl[y-1]>0 and y<=cap_year} or None
@@ -469,7 +471,7 @@ def hist_table(app, d, master):
     return html
 
 def build_html(app, asof, tbl, marg_txt, src):
-    js=APP_JS.replace("__APPDATA__",json.dumps(app,ensure_ascii=False)).replace("__REC__",json.dumps(NBER))
+    js=APP_JS.replace("__APPDATA__",json.dumps(app,ensure_ascii=False,separators=(",",":"))).replace("__REC__",json.dumps(NBER))
     srctxt=" · ".join(f"{k}={v}" for k,v in [
         ("S&P500",src.get("sp500")),("Nasdaq",src.get("nasdaq")),("費半",src.get("sox")),
         ("VIX",src.get("vix")),("金融環境",src.get("nfci")),("信用",src.get("credit")),
@@ -521,7 +523,7 @@ h1{font-size:21px;margin:0 0 3px}.sub{color:var(--ts);font-size:12.5px}
 .gtitle{font-size:12.5px;font-weight:650;margin:14px 0 8px}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 @media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 14px;border-left:3px solid var(--border);transition:border-color .1s}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 14px;border-left:3px solid var(--border);transition:border-color .1s;min-width:0;overflow-wrap:anywhere}
 .card.red{border-left-color:var(--red)}.card.warn{border-left-color:var(--warn)}.card.ok{border-left-color:var(--ok)}
 .ct{font-size:12px;color:var(--ts)}.cv{font-size:23px;font-weight:680;margin:3px 0;font-variant-numeric:tabular-nums}
 .cbarwrap{height:5px;background:var(--border);border-radius:3px;overflow:hidden}.cbar{height:100%;background:var(--red);width:0}

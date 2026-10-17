@@ -1,0 +1,222 @@
+# 自動更新 + 部署 GitHub Pages
+#
+#   每個交易日 台灣 07:50  台股脆弱度 / 美股脆弱度 / 產業熱度雷達
+#   每週六     台灣 10:17  產業題材報酬 industry_returns.json(並重建台股頁嵌入)
+#   每月 1 日  台灣 11:23  資產定價實驗室(2145 檔,最重,分多次續抓)
+#   push 到 main         只重新部署(不抓資料)
+#   手動 Run workflow     可選範圍
+#
+# GitHub cron 一律 UTC:台灣 = UTC+8,所以台灣週一~五 07:50 = UTC 週日~四 23:50。
+# 注意:用 GITHUB_TOKEN 推送的 commit 不會再觸發其他 workflow,所以這裡自己完成部署。
+name: update-and-deploy
+
+on:
+  schedule:
+    - cron: "50 23 * * 0-4"   # daily
+    - cron: "17 2 * * 6"      # weekly
+    - cron: "23 3 1 * *"      # monthly
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "更新範圍"
+        type: choice
+        default: daily
+        options: [daily, weekly, monthly, all, deploy-only]
+      force_alert:
+        description: "寄一封測試信(未達門檻也寄,標示[測試])"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+  TZ: Asia/Taipei
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide scope
+        id: scope
+        run: |
+          case "${{ github.event_name }}" in
+            push) s=deploy-only ;;
+            workflow_dispatch) s="${{ inputs.scope }}" ;;
+            schedule)
+              case "${{ github.event.schedule }}" in
+                "17 2 * * 6") s=weekly ;;
+                "23 3 1 * *") s=monthly ;;
+                *) s=daily ;;
+              esac ;;
+          esac
+          d=false; w=false; m=false
+          case "$s" in
+            daily) d=true ;; weekly) w=true ;; monthly) m=true ;; all) d=true; w=true; m=true ;;
+          esac
+          echo "scope=$s daily=$d weekly=$w monthly=$m"
+          { echo "daily=$d"; echo "weekly=$w"; echo "monthly=$m"; echo "fetch=$([ $s = deploy-only ] && echo false || echo true)"; } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        if: steps.scope.outputs.fetch == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        if: steps.scope.outputs.fetch == 'true'
+        run: pip install -r requirements.txt
+
+      # 股價快取不進版控,改放 Actions cache(每次都存新的一份,下次接著用 → 只抓增量)
+      - name: Restore heat cache
+        if: steps.scope.outputs.daily == 'true'
+        uses: actions/cache@v4
+        with:
+          path: heat_px_cache.json
+          key: heat-px-${{ github.run_id }}
+          restore-keys: heat-px-
+      - name: Restore industry cache
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true'
+        uses: actions/cache@v4
+        with:
+          path: industry_px_cache.json
+          key: industry-px-${{ github.run_id }}
+          restore-keys: industry-px-
+      # 每日也還原/存回(Actions cache 7 天沒用會被清掉),並用少量預算慢慢補齊
+      - name: Restore asset-pricing caches
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.monthly == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ap_px_cache.json
+            ap_fund_cache.json
+          key: ap-${{ github.run_id }}
+          restore-keys: ap-
+
+      - name: Retry helper
+        if: steps.scope.outputs.fetch == 'true'
+        run: |
+          cat > /tmp/retry.sh <<'EOF'
+          # usage: retry <tries> <cmd...>   — 每次失敗間隔 60s
+          n=$1; shift
+          for i in $(seq 1 "$n"); do "$@" && exit 0; echo "::warning::attempt $i failed: $*"; [ "$i" -lt "$n" ] && sleep 60; done
+          exit 1
+          EOF
+
+      # ---------- weekly ----------
+      - name: Industry returns (weekly)
+        if: steps.scope.outputs.weekly == 'true'
+        continue-on-error: true
+        env: { FETCH_BUDGET_MIN: "25" }
+        run: bash /tmp/retry.sh 2 python build_industry.py
+
+      # ---------- daily (weekly 也重建台股頁以嵌入新產業報酬) ----------
+      - name: Taiwan dashboard
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true'
+        continue-on-error: true
+        run: bash /tmp/retry.sh 3 python fragility_dashboard.py
+      - name: US dashboard
+        if: steps.scope.outputs.daily == 'true'
+        continue-on-error: true
+        run: bash /tmp/retry.sh 3 python us_fragility_dashboard.py
+      - name: Industry heat — fetch prices
+        if: steps.scope.outputs.daily == 'true'
+        continue-on-error: true
+        env: { FETCH_BUDGET_MIN: "45" }
+        run: python heat_fetch.py
+      - name: Industry heat — build page
+        if: steps.scope.outputs.daily == 'true'
+        continue-on-error: true
+        run: python ci_check.py heat && python industry_heat.py
+
+      # ---------- monthly(抓取在每日也小量進行;頁面每月重建)----------
+      - name: Asset pricing — prices
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.monthly == 'true'
+        continue-on-error: true
+        env:
+          FETCH_BUDGET_MIN: ${{ steps.scope.outputs.monthly == 'true' && '120' || '15' }}
+        run: python ap_px_fetch.py
+      - name: Asset pricing — fundamentals
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.monthly == 'true'
+        continue-on-error: true
+        env:
+          FETCH_BUDGET_MIN: ${{ steps.scope.outputs.monthly == 'true' && '120' || '15' }}
+        run: python ap_fetch.py
+      - name: Asset pricing — build page
+        if: steps.scope.outputs.monthly == 'true'
+        continue-on-error: true
+        run: python ci_check.py ap && python ap_lab.py
+
+      # ---------- 未來三個月美國關鍵數據 / FOMC(嵌入台股、美股頁)----------
+      - name: Macro calendar (FOMC / CPI / jobs …)
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true'
+        continue-on-error: true
+        env:
+          BLS_CONTACT: ${{ vars.BLS_CONTACT || secrets.SMTP_USER }}
+        run: python macro_calendar.py
+
+      # ---------- 警報信:結構 6 燈中 ≥4 亮紅 → 寄信附統計 ----------
+      - name: Fragility alert email
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true' || inputs.force_alert
+        continue-on-error: true
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_TO: ${{ vars.ALERT_TO || 's12332167890@gmail.com' }}
+          ALERT_MIN_RED: ${{ vars.ALERT_MIN_RED || '4' }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          FORCE: ${{ inputs.force_alert && '1' || '0' }}
+        run: python alert.py
+
+      # ---------- stamp + commit ----------
+      - name: Stamp pages (build-id + version.json)
+        run: python3 stamp.py
+
+      - name: Commit data
+        id: commit
+        if: steps.scope.outputs.fetch == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          touch alert_state.json
+          git add -A -- '*.html' '*.csv' industry_returns.json heat_members.json version.json alert_state.json macro_calendar.json
+          if git diff --cached --quiet; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git commit -m "data: auto update $(date +%F) [skip ci]"
+          for i in 1 2 3; do git pull --rebase -X theirs origin "${GITHUB_REF_NAME}" && git push && break; sleep 10; done
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # ---------- 只部署前端需要的檔案(不含 .py / 快取 / csv)----------
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp *.html autoupdate.js service-worker.js manifest.webmanifest version.json icon-*.png _site/
+          ls -la _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

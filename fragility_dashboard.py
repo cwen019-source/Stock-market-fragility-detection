@@ -278,7 +278,7 @@ def stress_test(d):
 
 def build_html(app, comp_now, asof, stress_cur, stress_rows):
     strows="".join(f"<tr><td>指數 −{x['drop']}%</td><td>{x['avg_ratio']}%</td><td class='r'>{x['pct_call']}%</td><td class='r'>{x['at_risk']:,} 億</td></tr>" for x in stress_rows)
-    js=APP_JS.replace("__APPDATA__",json.dumps(app,ensure_ascii=False)).replace("__REC__",json.dumps(NBER))
+    js=APP_JS.replace("__APPDATA__",json.dumps(app,ensure_ascii=False,separators=(",",":"))).replace("__REC__",json.dumps(NBER))
     return TEMPLATE.replace("__ASOF__",asof).replace("__STRESS__",strows).replace("__MARGIN__",f"{stress_cur:,.0f}").replace("__APPJS__",js)
 
 TEMPLATE=r"""<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8">
@@ -324,7 +324,7 @@ h1{font-size:21px;margin:0 0 3px}.sub{color:var(--ts);font-size:12.5px}
 .gtitle{font-size:12.5px;font-weight:650;margin:14px 0 8px}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 @media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 14px;border-left:3px solid var(--border);transition:border-color .1s}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 14px;border-left:3px solid var(--border);transition:border-color .1s;min-width:0;overflow-wrap:anywhere}
 .card.red{border-left-color:var(--red)}.card.warn{border-left-color:var(--warn)}.card.ok{border-left-color:var(--ok)}
 .ct{font-size:12px;color:var(--ts)}.cv{font-size:23px;font-weight:680;margin:3px 0;font-variant-numeric:tabular-nums}
 .cbarwrap{height:5px;background:var(--border);border-radius:3px;overflow:hidden}.cbar{height:100%;background:var(--red);width:0}

@@ -1,13 +1,12 @@
-industry_px_cache.json
-apidata.json
-__pycache__/
-*.pyc
-
-us_cache/
-__pycache__/
+# 股價/基本面快取(大檔,改由 GitHub Actions cache 保存)
 heat_px_cache.json
-heat_px_cache.json.tmp
+industry_px_cache.json
 ap_px_cache.json
 ap_fund_cache.json
-ap_px_cache.json.tmp
-ap_fund_cache.json.tmp
+ap_factors.json
+*.tmp
+us_cache/
+_site/
+__pycache__/
+.DS_Store
+alert_preview.eml

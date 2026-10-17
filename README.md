@@ -1,14 +1,15 @@
 # 台股 / 美股脆弱度儀表板 — GitHub Actions 每日自動版
 
-兩張儀表板,**台灣時間每個交易日早上 07:50(開盤前)自動更新**:
+四張頁面,**台灣時間每個交易日早上 07:50(開盤前)自動更新**,頁面開著也會提示新資料:
 
-三頁上方共用分頁列,可直接切換:
+上方共用分頁列,可直接切換:
 
 | 頁面 | 內容 |
 |---|---|
 | `index.html` | 台股脆弱度(融資餘額 / 三大法人 / 台幣 / 加權指數 + 美股韓股 VIX 外部因素) |
 | `us.html` | 美股脆弱度(**S&P 500 · Nasdaq · 費城半導體 SOX** + FINRA 全市場融資餘額) |
 | `industry_heat.html` | 產業熱度雷達(33 個官方產業別的 **pairwise 相關性**,判斷該選股還是買籃子) |
+| `asset_pricing.html` | 資產定價實驗室(台股自建 Fama-French / q-factor 因子,月頻,每月更新) |
 
 兩頁互相有切換連結,方法論相同:10 項指標一律轉成 **PIT 擴張百分位**(第 t 日只用當日及以前的資料,
 無前視偏誤),加權合成 0–100 脆弱度;含共用釘選游標、個股 K 線 + 月/季/半年線。純風控壓力計,非投資建議。
@@ -22,37 +23,64 @@
 
 ## 一次性設定(約 5 分鐘)
 
-1. 建一個新的 GitHub repository(Public),把本資料夾所有檔案上傳:
-   - 台股:`fragility_dashboard.py`、`index.html`、`fragility_history.csv`
-   - 美股:`us_fragility_dashboard.py`、`us.html`、`us_fragility_history.csv`
-   - 產業熱度:`heat_fetch.py`、`industry_heat.py`、`industry_heat.html`、`heat_members.json`
-   - 共用:`requirements.txt`、`.github/workflows/daily.yml`
+1. 把本資料夾所有檔案推到 GitHub repository 的 `main` 分支(含 `.github/workflows/update.yml`、`.gitignore`)。
+   股價快取(`heat_px_cache.json`、`ap_*_cache.json` 等)**不進版控**,改由 GitHub Actions cache 保存、每天只抓增量。
+2. **開啟 Pages**:repo → Settings → Pages → Source 選 **「GitHub Actions」**(不是 Deploy from a branch)。
+3. **Actions 寫入權限**:Settings → Actions → General → Workflow permissions → **Read and write permissions** → Save。
+4. **FinMind token(強烈建議)**:Settings → Secrets and variables → Actions → New repository secret,
+   Name = `FINMIND_TOKEN`。免 token 的匿名額度很快用完,產業熱度(每日 548 檔)與資產定價會抓不完。
+5. 手動跑一次:Actions → `update-and-deploy` → Run workflow → scope 選 `all`(第一次會比較久)。
 
-   > `heat_px_cache.json`(約 63MB 的股價快取)**不要進版控**,已列入 `.gitignore`;
-   > CI 每次會重新抓取 548 檔(約 1–2 分鐘)。
-2. **開啟 Pages**:repo → Settings → Pages → Source 選「Deploy from a branch」→ 分支 `main`、資料夾 `/ (root)` → Save。
-   稍等一兩分鐘,網址為 `https://<你的帳號>.github.io/<repo名>/`。
-3. **確認 Actions 有寫入權限**:Settings → Actions → General → 「Workflow permissions」選 **Read and write permissions** → Save。
-4. (可選)**提高 FinMind 上限**:Settings → Secrets and variables → Actions → New repository secret,
-   Name = `FINMIND_TOKEN`,Value = 你的 FinMind token(免費註冊 finmindtrade.com)。
-5. 先手動跑一次驗證:repo → Actions → 選「daily-fragility-dashboards」→ Run workflow。
-   跑完後打開 `https://<帳號>.github.io/<repo>/`(台股)與 `.../us.html`(美股)。
+## 自動更新怎麼運作
 
-之後不用管它:**台灣時間每個交易日 07:50** 自動更新兩張表,歷史分數 csv 會逐日累積。
-(GitHub 排程在尖峰時段可能延遲 5~20 分鐘,屬正常;頁面本身已內建多年回溯歷史線,第一天就有得看。)
+| 時間(台灣) | 範圍 | 內容 |
+|---|---|---|
+| 週一~五 07:50 | daily | 台股脆弱度、美股脆弱度、產業熱度雷達;資產定價快取小量續抓 |
+| 週六 10:17 | weekly | 題材產業報酬 `industry_returns.json` → 重建台股頁 |
+| 每月 1 日 11:23 | monthly | 資產定價實驗室(全市場 2145 檔) |
+| push 到 main | deploy-only | 只重新部署,不抓資料 |
 
-## 排程說明
+- 每張表各自重試、互不影響;抓資料有時間預算(`FETCH_BUDGET_MIN`),被速率限制時不會卡死整個 job。
+- 快取覆蓋率不足 90% 時(`ci_check.py`)**沿用上一版頁面**,不會用殘缺資料覆蓋。
+- 建置完 `stamp.py` 會替每頁蓋上 build-id 並產生 `version.json`。
+- **頁面開著也會更新**:`autoupdate.js` 每 10 分鐘、切回分頁、恢復網路時檢查 `version.json`;
+  有新資料 → 右下角提示「重新整理」;離開分頁超過 30 分鐘再回來 → 直接載入新版。
+  若建置超過 4 天沒跑,頁面會顯示「自動更新可能停擺」。
+- Service worker 對本站頁面採 network-first + 重新驗證(資料沒變只回 304),離線時退回快取。
 
-`.github/workflows/daily.yml` 的 cron 是 **`50 23 * * 0-4`**。GitHub cron 一律用 UTC:
+GitHub cron 一律用 UTC(台灣 07:50 = UTC 前一天 23:50,所以星期也往前挪一天:`50 23 * * 0-4`);
+尖峰時段可能延遲 5~20 分鐘,屬正常。
 
-- 台灣 = UTC+8 → 台灣 07:50 = UTC 23:50(**前一天**)
-- 星期也要跟著往前挪一天 → UTC 週日~週四 (`0-4`) = **台灣 週一~週五**
+## 警報信(結構 6 燈 ≥4 亮紅)
 
-三張表合併在同一個 job(避免多個工作流同時 `git push` 打架),任一張失敗會自動重試 3 次,
-且**不影響其他兩張**;三張都失敗時 workflow 才會顯示紅字。
+每次台股/美股頁重建後執行 `alert.py`:結構層 6 個燈號中有 **≥4 個危險度 ≥75(亮紅)** 就寄信,
+規則與頁面上「亮紅 x/6」相同。信件內含燈號表,附件 `fragility_stats_<日期>.xlsx`
+(摘要 / 各燈號最新值與危險度 / 近 60 日綜合分數、亮紅數、觸發與各燈號危險度)。同一市場同一資料日只寄一次。
+
+設定(Gmail):
+1. 寄件的 Gmail 帳號開啟兩步驟驗證 → 到 <https://myaccount.google.com/apppasswords> 產生「應用程式密碼」。
+2. repo → Settings → Secrets and variables → Actions → **Secrets**:`SMTP_USER` = 寄件 Gmail,`SMTP_PASS` = 應用程式密碼。
+3. (可選)同頁 **Variables**:`ALERT_TO` 改收件人(預設 s12332167890@gmail.com,可逗號分隔多位)、`ALERT_MIN_RED` 改門檻(預設 4)。
+4. 測試:Actions → Run workflow → 勾選 `force_alert`(scope 可選 deploy-only)→ 會寄一封信,未達門檻時標示 [測試]。
+
+## 未來三個月:美國關鍵數據與 FOMC(不確定性行事曆)
+
+台股、美股頁的儀表下方會顯示「以最新資料日起算三個月內」的美國重大事件(台灣時間、倒數天數),
+上方長條是**每週不確定性密度**(事件重要度加總,紅點 = FOMC 週)。每次每日更新都會重抓官方行事曆(`macro_calendar.py`):
+
+| 重要度 | 事件 | 來源 |
+|---|---|---|
+| 5 | FOMC 利率決策(含 SEP 點陣圖者另標)、非農就業、CPI | federalreserve.gov、BLS |
+| 4 | PCE 物價/個人所得支出、GDP 初值、零售銷售 | BEA JSON、Census |
+| 3 | PPI、JOLTS、ECI、GDP 第二/三次估計 | BLS、BEA |
+
+- 某來源抓取失敗時沿用上次 `macro_calendar.json` 裡的日期,並在頁面標示。
+- BLS 要求程式請求附聯絡 email:設 Actions **Variable** `BLS_CONTACT`(未設時改用 `SMTP_USER`;都沒有則沿用舊的 BLS 日期)。
+- 警報信會附上「未來兩週事件」,Excel 附件多一張「未來三個月事件」。
+- 想改成 N 個月:環境變數 `MACRO_MONTHS`。
 
 ## 調整
-- 改觸發時間:編輯 `.github/workflows/daily.yml` 的 `cron`(記得換算 UTC,跨午夜要順便挪星期)。
+- 改觸發時間:編輯 `.github/workflows/update.yml` 的 `cron`(記得換算 UTC,跨午夜要順便挪星期)。
 - 改指標權重/門檻:編輯 `fragility_dashboard.py` / `us_fragility_dashboard.py` 上方的 `WEIGHTS`、`INVERT`、`ORDER`。
 
 ## 資料源
@@ -80,7 +108,7 @@
 
 - 產業報酬 = 每題材籃子成分股(可於 `build_industry.py` 的 `THEMES` 自行增修)(還原股價)的**等權日報酬指數**(`build_industry.py` 產生 `industry_returns.json`)。
 - `industry_returns.json` 已含在 repo,`fragility_dashboard.py` 會自動嵌入;若檔案不存在則自動隱藏此區塊。
-- **每週自動更新**:`.github/workflows/weekly-industry.yml` 每週六重建並提交 `industry_returns.json`(較重,約抓 276 檔;建議設定 `FINMIND_TOKEN` secret)。
+- **每週自動更新**:`update.yml` 的 weekly 排程每週六重建並提交 `industry_returns.json`(較重,約抓 276 檔;建議設定 `FINMIND_TOKEN` secret)。
 - rank-IC 為描述性統計、樣本有限,**非投資建議**,亦非嚴謹的因子回測(未做 point-in-time / 多重檢定校正)。
 
 ---
