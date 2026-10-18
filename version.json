@@ -1,17 +1,17 @@
 {
- "built": "2026-10-18T21:07:42+00:00",
+ "built": "2026-10-18T21:49:29+00:00",
  "pages": {
   "index.html": {
-   "id": "2ad4a9418a24",
+   "id": "b10ec540b416",
    "asof": "2026-10-16"
   },
   "us.html": {
-   "id": "81cc577e4c5c",
+   "id": "99ba48de79c4",
    "asof": "2026-10-16"
   },
   "industry_heat.html": {
-   "id": "dd5a1f022a28",
-   "asof": "2026-07-24"
+   "id": "7db67845ce1e",
+   "asof": "2026-10-16"
   },
   "asset_pricing.html": {
    "id": "6474df5b52e9",
