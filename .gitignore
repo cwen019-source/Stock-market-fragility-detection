@@ -1,0 +1,13 @@
+# 股價/基本面快取(大檔,改由 GitHub Actions cache 保存)
+heat_px_cache.json
+industry_px_cache.json
+ap_px_cache.json
+ap_fund_cache.json
+ap_factors.json
+*.tmp
+us_cache/
+_site/
+__pycache__/
+.DS_Store
+alert_preview.eml
+v2_cache/
