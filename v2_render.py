@@ -59,6 +59,13 @@ CSS = """<style>
 .v2 .it .q{font-variant-numeric:tabular-nums;min-width:26px;text-align:right;font-weight:650}
 .v2 .ch{margin-top:12px;overflow-x:auto}.v2 .ch svg{width:100%;min-width:560px;height:auto;display:block}
 .v2 .f{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.55}
+.v2c{margin-top:12px}.v2c-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.v2c-bar button{border:1px solid var(--border);background:var(--surface);color:var(--ts);border-radius:8px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+.v2c-bar button.on{background:var(--series-1);border-color:var(--series-1);color:#fff}
+.v2c-view{font-size:12px;color:var(--series-1);margin:2px 0 4px;min-height:1.2em}
+.v2c-wrap{position:relative;overflow-x:auto}.v2c-wrap svg{width:100%;min-width:560px;height:auto;display:block;cursor:crosshair;user-select:none}
+.v2c-tip{position:absolute;pointer-events:none;opacity:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 9px;font-size:12px;line-height:1.5;box-shadow:0 4px 14px rgba(0,0,0,.12);white-space:nowrap;z-index:2;transition:opacity .08s}
+.v2.v2-hist .it{opacity:.45}.v2.v2-hist .bar i{transition:none}
 .v1note{font-size:12px;color:var(--muted);margin:4px 2px 0}
 @media(max-width:820px){.v2 .k,.v2 .g{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:420px){.v2{padding:14px}.v2 .k,.v2 .g{grid-template-columns:minmax(0,1fr)}}
@@ -188,6 +195,14 @@ def bt_lines(m):
     return zh, en
 
 
+def v2data(m):
+    """互動圖資料(歷史月資料、熊市區間、主動減碼日)。"""
+    d = {"history": m["history"], "bears": m.get("backtest", {}).get("bears", []),
+         "onsets": [{"date": e["date"], "maxloss12m": e.get("maxloss12m")} for e in m.get("reduce", {}).get("onsets", [])]}
+    js = json.dumps(d, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    return f'<script>window.V2DATA=window.V2DATA||{{}};window.V2DATA["{m["code"]}"]={js};</script>'
+
+
 def panel(m):
     lv = m.get("level", 0)
     name, desc, cls = LEVEL["zh"][lv]
@@ -201,13 +216,13 @@ def panel(m):
     sl = m.get("struct_level", 0)
     vsp = pct(f.get("vix_spike_pct"))
     k = [
-        (B("綜合脆弱度(CISS)", "Composite fragility (CISS)"), pct(m.get("composite_pct")),
+        (B("綜合脆弱度(CISS)", "Composite fragility (CISS)"), f'<span data-v2k="comp">{pct(m.get("composite_pct"))}</span>',
          B("歷史百分位;多類同時偏高才會高", "Historical percentile; high only when several categories are elevated together"), col(m.get("composite_pct"))),
         (B("紅區:信用 × 股價", "Red zone: credit × price"), B("是", "Yes") if m.get("redzone") else B("否", "No"),
          B(f"信用成長 {pct(m.get('credit_growth_pct'))} / 3年漲幅 {pct(m.get('price_growth_pct'))} 百分位",
            f"Credit growth {pct(m.get('credit_growth_pct'))}th / 3-yr gain {pct(m.get('price_growth_pct'))}th percentile"),
          "var(--red)" if m.get("redzone") else "var(--ok)"),
-        (B("12 個月壞情境(第10百分位)", "12-month bad case (10th percentile)"), "–" if gar is None else f"{gar * 100:+.0f}%",
+        (B("12 個月壞情境(第10百分位)", "12-month bad case (10th percentile)"), f'<span data-v2k="gar">{"–" if gar is None else f"{gar * 100:+.0f}%"}</span>',
          B("Growth-at-Risk:10% 機率比這更差", "Growth-at-Risk: 10% chance of worse"),
          "var(--red)" if (gar is not None and gar <= -0.15) else "var(--warn)" if (gar is not None and gar <= -0.08) else "var(--ok)"),
         (B("主動減碼訊號", "Reduce-longs signal"), B("成立", "ON") if red_on else B("未成立", "Off"),
@@ -222,8 +237,8 @@ def panel(m):
         items = "".join(f'<div class="it"><span>{B(H.escape(i["label"]), H.escape(IND_EN.get(i["key"], i["label"])))}</span>'
                         f'<span class="v">{B(H.escape(i.get("disp", "–")), H.escape(disp_en(i.get("disp", "–"))))}</span>'
                         f'<span class="q" style="color:{col(i.get("pct"))}">{pct(i.get("pct"))}</span></div>' for i in p["items"])
-        ph += (f'<div class="p"><div class="pt"><span>{key} · {B(PNAME["zh"][key], PNAME["en"][key])}</span><b style="color:{col(sc)}">{pct(sc)}</b></div>'
-               f'<div class="bar"><i style="width:{(sc or 0) * 100:.0f}%;background:{col(sc)}"></i><s></s></div>{items}</div>')
+        ph += (f'<div class="p"><div class="pt"><span>{key} · {B(PNAME["zh"][key], PNAME["en"][key])}</span><b data-v2p="{key}" style="color:{col(sc)}">{pct(sc)}</b></div>'
+               f'<div class="bar"><i data-v2bar="{key}" style="width:{(sc or 0) * 100:.0f}%;background:{col(sc)}"></i><s></s></div>{items}</div>')
     stale = any(not str(v).startswith(("net", "cache")) for v in m.get("status", {}).values()) or m.get("stale")
     bz, be = bt_lines(m)
     foot = B(f"藍線=綜合脆弱度歷史百分位(虛線 80)· 紅色陰影=實際熊市 · 底部橘點=結構脆弱(≥2)月份 · "
@@ -234,10 +249,11 @@ def panel(m):
     return (f'<!--V2PANEL-->{CSS}<div class="v2" id="v2">'
             f'<div class="h"><span class="t">{B("結構風險 v2 · 四類脆弱性", "Structural risk v2 · four vulnerability categories")}</span>'
             f'<span class="lv {cls}">{B(name, name_en)}</span><a href="methodology.html">{B("方法與回測 →", "Method & backtest →")}</a></div>'
-            f'<div class="s">{B(H.escape(desc), H.escape(desc_en))} · {B("資料至", "Data through")} {m["asof"]}'
+            f'<div class="s">{B(H.escape(desc), H.escape(desc_en))} · {B("資料至", "Data through")} {m["asof"]}<b data-v2k="histdate" data-noi18n style="color:var(--series-1)"></b>'
             f'{B(" · ⚠ 部分資料沿用快取", " · ⚠ some data from cache") if stale else ""}</div>'
             f'<div class="k">{kh}</div><div class="g">{ph}</div>'
-            f'<div class="ch">{chart(m, years=15)}</div><div class="f">{foot}</div></div>'
+            f'{v2data(m)}<div class="v2c" data-code="{m["code"]}" data-years="15">{chart(m, years=15)}</div>'
+            f'<div class="f">{foot}</div></div><script src="v2chart.js" defer></script>'
             f'<div class="v1note">{B("↓ 以下為舊版 6 燈(融資三指標同源、重複計票;保留供參考,警報信已改用 v2)", "↓ Below: the original 6-light dashboard (three margin-debt signals double-count; kept for reference — alert emails now use v2)")}</div><!--/V2PANEL-->\n')
 
 
@@ -379,7 +395,7 @@ def market_section(m, lang):
     lvl = LEVEL[lang][m["level"]][0]
     return f"""
 <section><h2>{MNAME[lang][code]} · {T(lang, '目前', 'now')}: {lvl} · {T(lang, '回測', 'backtest')} {b['window']}({b['n_bears']} {T(lang, '次熊市', 'bear markets')})</h2>
-<div class="chart">{chart(m, lang=lang)}</div>
+<div class="v2c" data-code="{code}" data-years="0">{chart(m, lang=lang)}</div>
 <p class="note">{T(lang, '藍線 = 綜合脆弱度歷史百分位;紅色陰影 = 熊市(高點→低點 ≥20%);底部橘點 = 結構脆弱(≥2)月份;頂部紅 ▼ = 主動減碼日。',
                   'Blue = composite fragility (historical percentile); red bands = bear markets (peak→trough ≥20%); orange ticks = vulnerable (level ≥2) months; red ▼ = reduce-longs dates.')}</p>
 {reduce_section(m, lang)}
@@ -478,10 +494,17 @@ table.c{{width:auto}}table.c td{{text-align:right}}.note{{color:var(--muted);fon
 .ep.y{{background:color-mix(in srgb,var(--ok) 18%,transparent)}}.ep.n{{background:color-mix(in srgb,var(--red) 18%,transparent)}}
 ol li,ul li{{margin:4px 0}}code{{background:color-mix(in srgb,var(--border) 60%,transparent);padding:1px 5px;border-radius:5px;font-size:13px}}
 html:not([lang^=en]) .L-en,html[lang^=en] .L-zh{{display:none}}
+.v2c-bar{{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}}
+.v2c-bar button{{border:1px solid var(--border);background:var(--surface);color:var(--ts);border-radius:8px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}}
+.v2c-bar button.on{{background:var(--series-1);border-color:var(--series-1);color:#fff}}
+.v2c-view{{font-size:12px;color:var(--series-1);margin:2px 0 4px;min-height:1.2em}}
+.v2c-wrap{{position:relative;overflow-x:auto}}.v2c-wrap svg{{width:100%;min-width:560px;height:auto;display:block;cursor:crosshair;user-select:none}}
+.v2c-tip{{position:absolute;pointer-events:none;opacity:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 9px;font-size:12px;line-height:1.5;box-shadow:0 4px 14px rgba(0,0,0,.12);white-space:nowrap;z-index:2}}
 </style></head><body><div class="wrap">
+{"".join(v2data(m) for m in data["markets"].values())}
 <div class="L-zh" data-noi18n>{body("zh")}</div>
 <div class="L-en" data-noi18n>{body("en")}</div>
-</div></body></html>"""
+</div><script src="v2chart.js" defer></script></body></html>"""
 
 
 def inject_all(data):

@@ -1,8 +1,8 @@
 // 脆弱度儀表板 PWA service worker
 // 策略:本站頁面 network-first 並強制向伺服器重新驗證(拿得到就一定是最新,離線才退回快取);
 //      version.json 永遠走網路不快取;FinMind/FRED/stockanalysis 等跨站請求不攔截(即時抓)。
-const CACHE = 'fragility-v3';
-const SHELL = ['./', 'index.html', 'us.html', 'autoupdate.js', 'i18n.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'fragility-v4';
+const SHELL = ['./', 'index.html', 'us.html', 'autoupdate.js', 'i18n.js', 'v2chart.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));

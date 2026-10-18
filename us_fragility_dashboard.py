@@ -728,7 +728,7 @@ function showAt(i){sel=i;const x=X(i),y=Y(D.comp[i]);
  const rc=redCount(i);tip.style.opacity='1';
  tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>紅區 '+rc+'/'+NSLOW+(brakeState(i)==='brake'?' ⚠踩剎車':'');
  let tx=x+12;if(tx>W-104)tx=x-104;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';
- $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(移動任一圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
+ $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(← → 鍵逐日移動,Shift 一次 20 日;移動任一圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
  gauge(i);renderCards(i);
  syncStockCursor(D.dates[i]);}
 function move(ev){if(pinned)return;showAt(idxAt(ev));}
@@ -786,6 +786,16 @@ $('d1').onchange=()=>sharedDates($('d0').value,$('d1').value);
 svg.addEventListener('wheel',e=>wheelZoom(e,ev=>idxAt(ev)),{passive:false});
 svg.addEventListener('mousemove',move);svg.addEventListener('mouseleave',leave);
 svg.addEventListener('click',onClick);svg.addEventListener('dblclick',unpin);
+// ← → 鍵:固定(📌)時逐日移動共用游標;Shift 一次 20 個交易日;超出目前視窗會自動平移
+document.addEventListener('keydown',function(e){
+ if(!pinned||pinIdx==null||e.altKey||e.ctrlKey||e.metaKey)return;
+ if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;
+ const tg=e.target;if(tg&&/INPUT|SELECT|TEXTAREA/.test(tg.tagName))return;
+ e.preventDefault();
+ const ni=Math.max(0,Math.min(N-1,pinIdx+(e.shiftKey?20:1)*(e.key==='ArrowLeft'?-1:1)));
+ if(ni===pinIdx)return;pinIdx=ni;
+ if(ni<a||ni>b){const span=b-a;let na=ni<a?ni:ni-span;na=Math.max(0,Math.min(N-1-span,na));clearBtns();applyWindow(D.dates[na],D.dates[na+span]);}
+ showAt(pinIdx);});
 svg.addEventListener('touchmove',e=>move(e),{passive:true});
 let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(renderTrend,150);});
 // ---- 個股搜尋(stockanalysis.com, 支援 CORS) ----

@@ -1,12 +1,12 @@
 {
- "built": "2026-10-18T21:07:42+00:00",
+ "built": "2026-10-18T21:58:19+00:00",
  "pages": {
   "index.html": {
-   "id": "2ad4a9418a24",
+   "id": "7a63a434da98",
    "asof": "2026-10-16"
   },
   "us.html": {
-   "id": "81cc577e4c5c",
+   "id": "2774d64ef1db",
    "asof": "2026-10-16"
   },
   "industry_heat.html": {
@@ -18,7 +18,7 @@
    "asof": "2026-07"
   },
   "methodology.html": {
-   "id": "cdf7328ab4c7",
+   "id": "7b67fa3559f7",
    "asof": "2026-10-16"
   }
  }

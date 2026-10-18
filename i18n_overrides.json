@@ -2,5 +2,7 @@
  "脆弱度 v2 方法論": "Fragility v2 methodology",
  "中文": "中文",
  "美股脆弱度": "US Stock Fragility",
- "台股脆弱度": "Taiwan Stock Fragility"
+ "台股脆弱度": "Taiwan Stock Fragility",
+ "(← → 鍵逐日移動,Shift 一次 20 日;移動任一圖換位置,點兩下取消)": " (← → move by day, Shift = 20 days; move any chart to reposition, double-click to release)",
+ "已固定於": "Pinned at"
 }

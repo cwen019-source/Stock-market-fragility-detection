@@ -217,7 +217,7 @@ jobs:
       - name: Assemble site
         run: |
           mkdir -p _site
-          cp *.html autoupdate.js i18n.js service-worker.js manifest.webmanifest version.json icon-*.png _site/
+          cp *.html autoupdate.js i18n.js v2chart.js service-worker.js manifest.webmanifest version.json icon-*.png _site/
           ls -la _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
