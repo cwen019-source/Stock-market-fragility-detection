@@ -11,8 +11,8 @@ import json
 import os
 import re
 
-PAGES = ["index.html", "us.html", "industry_heat.html", "asset_pricing.html"]
-MARK = re.compile(r'<meta name="build-id"[^>]*>\s*<script src="autoupdate\.js[^"]*" defer></script>\s*')
+PAGES = ["index.html", "us.html", "industry_heat.html", "asset_pricing.html", "methodology.html"]
+MARK = re.compile(r'<meta name="build-id"[^>]*>\s*(?:<script src="i18n\.js[^"]*"></script>\s*)?<script src="autoupdate\.js[^"]*" defer></script>\s*')
 ASOF = re.compile(r"更新於\s*(\d{4}-\d{2}-\d{2})")
 DAY = re.compile(r'"(\d{4}-\d{2}-\d{2})"')
 MON = re.compile(r'"(\d{4}-\d{2})"')
@@ -36,6 +36,7 @@ def data_asof(html):
 
 def main():
     js_v = file_hash("autoupdate.js", 8) if os.path.exists("autoupdate.js") else "0"
+    i18n_v = file_hash("i18n.js", 8) if os.path.exists("i18n.js") else None
     pages = {}
     for p in PAGES:
         if not os.path.exists(p):
@@ -43,7 +44,8 @@ def main():
         html = open(p, encoding="utf-8").read()
         html = MARK.sub("", html)
         bid = hashlib.sha1(html.encode("utf-8")).hexdigest()[:12]
-        tag = f'<meta name="build-id" content="{bid}"><script src="autoupdate.js?v={js_v}" defer></script>\n'
+        i18n = f'<script src="i18n.js?v={i18n_v}"></script>' if i18n_v else ""
+        tag = f'<meta name="build-id" content="{bid}">{i18n}<script src="autoupdate.js?v={js_v}" defer></script>\n'
         html = html.replace("</head>", tag + "</head>", 1)
         open(p, "w", encoding="utf-8").write(html)
         pages[p] = {"id": bid, "asof": data_asof(html)}

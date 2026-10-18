@@ -180,7 +180,7 @@ details summary{cursor:pointer;font-weight:650}
 @media(max-width:920px){.grid2{grid-template-columns:1fr}}
 </style></head><body><button id="th">◐</button><div class="wrap">
 <h1>台股資產定價實驗室 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">迴歸即時計算</span></h1>
-<nav class="tabs"><a href="index.html">台股脆弱度</a><a href="us.html">美股脆弱度</a><a href="industry_heat.html">產業熱度雷達</a><a href="asset_pricing.html" class="on">資產定價實驗室</a></nav>
+<nav class="tabs"><a href="index.html">台股脆弱度</a><a href="us.html">美股脆弱度</a><a href="industry_heat.html">產業熱度雷達</a><a href="asset_pricing.html" class="on">資產定價實驗室</a><a href="methodology.html">方法論</a></nav>
 <div class="sub">自建台股因子 · 月頻 · 財報落後 45 天 · 迴歸在瀏覽器端即時執行,可自由調整區間與因子組合 · 非投資建議</div>
 
 <div class="card"><div class="ctl">

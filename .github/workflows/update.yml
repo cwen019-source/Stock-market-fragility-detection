@@ -170,6 +170,19 @@ jobs:
           BLS_CONTACT: ${{ vars.BLS_CONTACT || secrets.SMTP_USER }}
         run: python macro_calendar.py
 
+      # ---------- 結構風險 v2(四類脆弱性 + CISS + 紅區 + GaR;嵌入頁面 + methodology.html)----------
+      - name: Restore v2 cache
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true'
+        uses: actions/cache@v4
+        with:
+          path: v2_cache
+          key: v2-${{ github.run_id }}
+          restore-keys: v2-
+      - name: Fragility v2 model
+        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true'
+        continue-on-error: true
+        run: python fragility_v2.py --inject
+
       # ---------- 警報信:結構 6 燈中 ≥4 亮紅 → 寄信附統計 ----------
       - name: Fragility alert email
         if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true' || inputs.force_alert
@@ -185,7 +198,7 @@ jobs:
 
       # ---------- stamp + commit ----------
       - name: Stamp pages (build-id + version.json)
-        run: python3 stamp.py
+        run: python3 build_i18n.py && python3 stamp.py
 
       - name: Commit data
         id: commit
@@ -194,7 +207,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           touch alert_state.json
-          git add -A -- '*.html' '*.csv' industry_returns.json heat_members.json version.json alert_state.json macro_calendar.json
+          git add -A -- '*.html' '*.csv' industry_returns.json heat_members.json version.json alert_state.json macro_calendar.json fragility_v2.json
           if git diff --cached --quiet; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           git commit -m "data: auto update $(date +%F) [skip ci]"
           for i in 1 2 3; do git pull --rebase -X theirs origin "${GITHUB_REF_NAME}" && git push && break; sleep 10; done
@@ -204,7 +217,7 @@ jobs:
       - name: Assemble site
         run: |
           mkdir -p _site
-          cp *.html autoupdate.js service-worker.js manifest.webmanifest version.json icon-*.png _site/
+          cp *.html autoupdate.js i18n.js service-worker.js manifest.webmanifest version.json icon-*.png _site/
           ls -la _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

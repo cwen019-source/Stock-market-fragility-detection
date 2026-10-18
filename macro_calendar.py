@@ -250,15 +250,17 @@ CSS = """<style>
 .mcal li.past{opacity:.45}.mcal li.lo{display:none}.mcal.all li.lo{display:grid}
 .mcal .more{margin-top:8px;border:1px solid var(--border);background:transparent;color:var(--ts);border-radius:8px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
 @media(max-width:560px){.mcal{padding:14px}}
+html:not([lang^=en]) .L-en,html[lang^=en] .L-zh{display:none}
 </style>"""
 
-JS = """<script>(function(){var r=document.getElementById('mcal');if(!r)return;
+JS = """<script>(function(){var r=document.getElementById('mcal');if(!r)return;var EN=/^en/.test(document.documentElement.lang||'');
 var now=new Date(),first=null;
 r.querySelectorAll('li[data-t]').forEach(function(li){var t=new Date(li.dataset.t),d=Math.ceil((t-now)/864e5),c=li.querySelector('.c');
- if(t<now){li.classList.add('past');c.textContent='已公布';}else{c.textContent=d<=0?'今天':'D-'+d;if(!first)first=li;}});
+ if(t<now){li.classList.add('past');c.textContent=EN?'released':'已公布';}else{c.textContent=d<=0?(EN?'today':'今天'):'D-'+d;if(!first)first=li;}});
 var nx=document.getElementById('mcal-next');if(nx&&first){var dd=Math.ceil((new Date(first.dataset.t)-now)/864e5);
- nx.innerHTML='下一個:<b>'+first.querySelector('.n b').textContent+'</b> · '+first.querySelector('.d').textContent+(dd<=0?'(今天)':'(還有 '+dd+' 天)');}
-var b=r.querySelector('.more');if(b)b.onclick=function(){r.classList.toggle('all');b.textContent=r.classList.contains('all')?'只看重要':'顯示全部 '+b.dataset.n+' 項';};
+ var nm=first.querySelector('.n b '+(EN?'.L-en':'.L-zh')),dt=first.querySelector('.d').cloneNode(true);dt.querySelectorAll(EN?'.L-zh':'.L-en').forEach(function(x){x.remove()});
+ nx.innerHTML=(EN?'Next: <b>':'下一個:<b>')+nm.textContent+'</b> · '+dt.textContent+(dd<=0?(EN?' (today)':'(今天)'):(EN?' (in '+dd+' days)':'(還有 '+dd+' 天)'));}
+var b=r.querySelector('.more');if(b){var lab=function(){var a=r.classList.contains('all');b.textContent=EN?(a?'Key events only':'Show all '+b.dataset.n+' events'):(a?'只看重要':'顯示全部 '+b.dataset.n+' 項');};lab();b.onclick=function(){r.classList.toggle('all');lab();};}
 })();</script>"""
 
 
@@ -267,6 +269,29 @@ def short_ref(r):
     m = re.match(r"([A-Z][a-z]+) (\d{4})$", r or "")
     if m and m.group(1)[:3] in MON:
         return f"{m.group(2)[2:]}年{MON[m.group(1)[:3]]}月"
+    q = {"First": 1, "Second": 2, "Third": 3, "Fourth": 4}
+    m = re.match(r"(First|Second|Third|Fourth) Quarter (\d{4})$", r or "")
+    return f"{m.group(2)} Q{q[m.group(1)]}" if m else (r or "")
+
+
+NAME_EN = {"非農就業報告": "Nonfarm payrolls", "CPI 消費者物價": "CPI inflation", "PPI 生產者物價": "PPI producer prices",
+           "JOLTS 職缺": "JOLTS job openings", "ECI 雇用成本指數": "Employment Cost Index",
+           "PCE 物價 / 個人所得支出": "PCE inflation / personal income", "GDP 初值": "GDP (advance)",
+           "GDP 第二次估計": "GDP (2nd estimate)", "GDP 第三次估計": "GDP (3rd estimate)", "零售銷售": "Retail sales",
+           "FOMC 利率決策": "FOMC rate decision", "FOMC 利率決策+點陣圖": "FOMC decision + dot plot"}
+WD_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+MON_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def B(zh, en):
+    """雙語片段:依 <html lang> 顯示其一(i18n.js 不再翻譯這兩段)。"""
+    return f'<span class="L-zh" data-noi18n>{zh}</span><span class="L-en" data-noi18n>{en}</span>'
+
+
+def short_ref_en(r):
+    m = re.match(r"([A-Z][a-z]+) (\d{4})$", r or "")
+    if m:
+        return f"{m.group(1)[:3]} {m.group(2)}"
     q = {"First": 1, "Second": 2, "Third": 3, "Fourth": 4}
     m = re.match(r"(First|Second|Third|Fourth) Quarter (\d{4})$", r or "")
     return f"{m.group(2)} Q{q[m.group(1)]}" if m else (r or "")
@@ -294,7 +319,7 @@ def render(data):
     labels, last_m = [], None
     for k in range(nweeks):
         d = w0 + dt.timedelta(weeks=k)
-        labels.append(f"<span>{d.month}月</span>" if d.month != last_m else "<span></span>")
+        labels.append(f"<span>{B(f'{d.month}月', MON_EN[d.month - 1])}</span>" if d.month != last_m else "<span></span>")
         last_m = d.month
     items, n_lo = [], 0
     for e in evs:
@@ -302,24 +327,25 @@ def render(data):
         t_tw = t_et.astimezone(TW)
         lo = e["tier"] < 4
         n_lo += lo
-        sub = short_ref(e.get("ref", ""))
+        sub, sub_en = short_ref(e.get("ref", "")), short_ref_en(e.get("ref", ""))
+        nm_en = NAME_EN.get(e["name"], e.get("en", e["name"]))
         items.append(
             f'<li class="t{e["tier"]}{" lo" if lo else ""}" data-t="{t_et.isoformat()}" title="{H.escape(e["en"])} · 美東 {e["date"]} {e["et"]} · {e["src"]}{(" · " + H.escape(e["note"])) if e.get("note") else ""}">'
-            f'<span class="d">{t_tw:%m/%d}({WD[t_tw.weekday()]}) {t_tw:%H:%M}</span>'
-            f'<span class="n"><b>{H.escape(e["name"])}</b>{f"<small>{H.escape(sub)}</small>" if sub else ""}</span>'
+            f'<span class="d">{t_tw:%m/%d}{B(f"({WD[t_tw.weekday()]})", f" {WD_EN[t_tw.weekday()]}")} {t_tw:%H:%M}</span>'
+            f'<span class="n"><b>{B(H.escape(e["name"]), H.escape(nm_en))}</b>{f"<small>{B(H.escape(sub), H.escape(sub_en))}</small>" if sub else ""}</span>'
             f'<span class="c"></span></li>')
     n5 = sum(e["tier"] == 5 for e in evs)
     stale = [k for k, v in data.get("status", {}).items() if v != "ok"]
-    more = f'<button class="more" data-n="{len(evs)}">顯示全部 {len(evs)} 項</button>' if n_lo else ""
+    more = f'<button class="more" data-n="{len(evs)}" data-noi18n></button>' if n_lo else ""
     return (f'<!--MACROCAL-->{CSS}<div class="mcal" id="mcal">'
-            f'<div class="mh"><span class="mt">未來三個月 · 美國關鍵數據與 FOMC</span>'
-            f'<span class="ms">{start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 台灣時間 · {len(evs)} 項,其中 {n5} 項最高重要度(FOMC/非農/CPI)'
-            f'{" · " + "/".join(stale) + " 沿用舊日期" if stale else ""}</span></div>'
-            f'<div class="nx" id="mcal-next"></div>'
+            f'<div class="mh"><span class="mt">{B("未來三個月 · 美國關鍵數據與 FOMC", "Next 3 months · key US data & FOMC")}</span>'
+            f'<span class="ms">{B(f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 台灣時間 · {len(evs)} 項,其中 {n5} 項最高重要度(FOMC/非農/CPI)", f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d} · Taiwan time · {len(evs)} events, {n5} top-importance (FOMC / payrolls / CPI)")}'
+            f'{" · " + "/".join(stale) + B(" 沿用舊日期", " using last known dates") if stale else ""}</span></div>'
+            f'<div class="nx" id="mcal-next" data-noi18n></div>'
             f'<div class="strip">{bars}</div><div class="wl">{"".join(labels)}</div>'
-            f'<div class="lg">每週不確定性密度 = 當週事件重要度加總:<span style="color:var(--red)">■</span> 高 '
-            f'<span style="color:var(--warn)">■</span> 中 <span style="color:var(--series-1)">■</span> 低 · '
-            f'<span style="color:var(--red)">●</span> FOMC 週。這些日子波動通常放大,脆弱度高時更要留意。</div>'
+            f'<div class="lg">{B("每週不確定性密度 = 當週事件重要度加總:", "Weekly uncertainty density = sum of event importance that week: ")}<span style="color:var(--red)">■</span> {B("高", "high")} '
+            f'<span style="color:var(--warn)">■</span> {B("中", "medium")} <span style="color:var(--series-1)">■</span> {B("低", "low")} · '
+            f'<span style="color:var(--red)">●</span> {B("FOMC 週。這些日子波動通常放大,脆弱度高時更要留意。", "FOMC week. Volatility usually rises around these dates — take extra care when fragility is high.")}</div>'
             f'<ul>{"".join(items)}</ul>{more}</div>{JS}<!--/MACROCAL-->\n')
 
 

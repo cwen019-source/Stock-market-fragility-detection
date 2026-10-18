@@ -10,3 +10,4 @@ _site/
 __pycache__/
 .DS_Store
 alert_preview.eml
+v2_cache/
