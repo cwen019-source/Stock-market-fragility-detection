@@ -1,25 +1,25 @@
 {
- "built": "2026-10-19T01:46:55+00:00",
+ "built": "2026-10-19T20:39:53+00:00",
  "pages": {
   "index.html": {
-   "id": "7852fbddc24e",
-   "asof": "2026-10-16"
+   "id": "5ae0e05a6f9c",
+   "asof": "2026-10-19"
   },
   "us.html": {
-   "id": "404a9a06599e",
-   "asof": "2026-10-16"
+   "id": "8d35957e69ee",
+   "asof": "2026-10-19"
   },
   "industry_heat.html": {
-   "id": "7db67845ce1e",
-   "asof": "2026-10-16"
+   "id": "90611cb34c1e",
+   "asof": "2026-10-19"
   },
   "asset_pricing.html": {
    "id": "6474df5b52e9",
    "asof": "2026-07"
   },
   "methodology.html": {
-   "id": "7b67fa3559f7",
-   "asof": "2026-10-16"
+   "id": "4d9b70f13b9b",
+   "asof": "2026-10-19"
   }
  }
 }

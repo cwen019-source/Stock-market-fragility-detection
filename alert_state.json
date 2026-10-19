@@ -1,14 +1,14 @@
 {
  "TW": {
-  "notified_level": 2,
-  "level": 2,
-  "asof": "2026-10-16",
-  "last_sent": "2026-10-16"
+  "notified_level": 3,
+  "level": 3,
+  "asof": "2026-10-19",
+  "last_sent": "2026-10-19"
  },
  "US": {
-  "notified_level": 0,
-  "level": 0,
-  "asof": "2026-10-16",
-  "last_sent": "2026-10-16"
+  "notified_level": 1,
+  "level": 1,
+  "asof": "2026-10-19",
+  "last_sent": "2026-10-19"
  }
 }
