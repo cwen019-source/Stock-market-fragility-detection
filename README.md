@@ -93,7 +93,8 @@ GitHub cron 一律用 UTC(台灣 07:50 = UTC 前一天 23:50,所以星期也往�
 ## 資料源
 **台股**
 - FinMind:融資餘額 / 加權指數+成交值 / 三大法人(外資)/ USD-TWD
-- FRED:美國 VIX(VIXCLS)/ Nasdaq / KOSPI
+- FRED:美國 VIX(VIXCLS)/ KOSPI
+- Yahoo Finance:費城半導體指數 PHLX SOX(^SOX);抓取失敗時以 iShares SOXX ETF 還原價代理
 
 ## 免責
 本專案為風險分析框架,所有數據僅供研究參考,**非投資建議**。

@@ -139,7 +139,7 @@ def main():
         return 0
     test = all(h["red"] < h["need"] for h in hits)
     msg["Subject"] = ("[測試] 燈號現況:" if test else "⛔ 停買警報:") + ";".join(
-        f"{h['name']} 亮紅 {h['red']}/{h['n']}" + ("(停買)" if h["red"] >= h["need"] else "") for h in hits) + f" · {max(h['asof'] for h in hits)}"
+        f"{h['name']} 亮紅 {h['red']}/{h['n']}" + ("(停買可賣)" if h["red"] >= h["need"] else "") for h in hits) + f" · {max(h['asof'] for h in hits)}"
     msg.set_content("\n".join(f"{h['name']} {h['asof']} 亮紅 {h['red']}/{h['n']}" for h in hits))
     intro = ("<p>台股規則:前一交易日收盤四個停買燈號中 ≥3 燈達 75 分 → 隔日不新買進(賣出、停損照常)。"
              + (f"<a href=\"{escape(site)}\">儀表板</a>" if site else "") + "</p>")

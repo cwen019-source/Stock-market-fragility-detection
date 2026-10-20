@@ -39,7 +39,7 @@ MARGIN3=["margin_resid_z","margin_yoy_div","margin_roc"]
 STOP4=["margin_combo","foreign_flow","fx_pressure","vix_level"]
 STOP_N=3
 TRIGGER={"vix_spike"}                   # 另有「跌破年線」由 trend_health 值判定
-MOMO={"trend_health","us_nasdaq","kr_bubble"}
+MOMO={"trend_health","us_sox","kr_bubble"}
 GROUP={**{k:"內部槓桿" for k in ("margin_resid_z","margin_yoy_div","margin_roc")},
        **{k:"外部資金情緒" for k in ("vix_level","foreign_flow","fx_pressure")},
        **{k:"觸發層" for k in TRIGGER},
@@ -48,13 +48,13 @@ TRIG_PCT=85                             # VIX跳升危險度達此百分位即�
 LEV_CAP={"high":1.0,"mid":1.2,"low":1.5}   # 結構脆弱度 →槓桿上限
 WEIGHTS={"margin_resid_z":1.4,"margin_yoy_div":1.3,"margin_roc":1.0,"vix_level":0.9,
          "vix_spike":0.7,"foreign_flow":1.1,"fx_pressure":0.8,"trend_health":1.0,
-         "us_nasdaq":0.9,"kr_bubble":0.6}
+         "us_sox":0.9,"kr_bubble":0.6}
 # 顯示格式 [是否強制正負號, 小數位, 單位]
 FMT={"margin_resid_z":[1,1,"σ"],"margin_yoy_div":[1,1,"pp"],"margin_roc":[0,1,"%"],
      "vix_level":[0,1,""],"vix_spike":[1,1,""],"foreign_flow":[1,0,"億"],
-     "fx_pressure":[1,1,"%"],"trend_health":[1,1,"%"],"us_nasdaq":[1,1,"%"],"kr_bubble":[1,1,"%"]}
+     "fx_pressure":[1,1,"%"],"trend_health":[1,1,"%"],"us_sox":[1,1,"%"],"kr_bubble":[1,1,"%"]}
 ORDER=["margin_combo","margin_resid_z","margin_yoy_div","margin_roc","trend_health",
-       "foreign_flow","fx_pressure","vix_level","vix_spike","us_nasdaq","kr_bubble"]
+       "foreign_flow","fx_pressure","vix_level","vix_spike","us_sox","kr_bubble"]
 # NBER 美國景氣衰退期(資料起於~2013, 實務上僅 2020 COVID 落在範圍內)
 NBER=[["1990-07-01","1991-03-31"],["2001-03-01","2001-11-30"],
       ["2007-12-01","2009-06-30"],["2020-02-01","2020-04-30"]]
@@ -77,6 +77,34 @@ def fred(series):
         return df.dropna().set_index("date")["val"]
     except Exception:
         return pd.Series(dtype=float)
+
+UA={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"}
+
+def fetch_sox():
+    """費城半導體指數 PHLX SOX(^SOX)日收盤。首選 Yahoo Finance;失敗時退回 iShares SOXX ETF 還原價(代理)。
+    回傳 (Series, 來源說明)。"""
+    p1=int(pd.Timestamp(START).timestamp())
+    for host in ("query1","query2"):
+        for attempt in range(2):
+            try:
+                r=requests.get(f"https://{host}.finance.yahoo.com/v8/finance/chart/%5ESOX",
+                               params={"period1":p1,"period2":int(pd.Timestamp.now().timestamp()),"interval":"1d"},headers=UA,timeout=30)
+                res=r.json()["chart"]["result"][0]
+                ts=pd.to_datetime(res["timestamp"],unit="s").normalize()
+                cl=pd.Series(res["indicators"]["quote"][0]["close"],index=ts,dtype=float).dropna()
+                cl=cl[~cl.index.duplicated(keep="last")]
+                if len(cl)>250: return cl,"PHLX SOX(Yahoo ^SOX)"
+            except Exception as e:
+                print(f"   [retry] ^SOX {host} #{attempt+1} {repr(e)[:60]}")
+    try:
+        r=requests.get("https://stockanalysis.com/api/symbol/e/SOXX/history?range=10Y",headers=UA,timeout=(10,30))
+        df=pd.DataFrame(r.json().get("data") or [])
+        if len(df):
+            s=pd.Series(pd.to_numeric(df["a"],errors="coerce").values,index=pd.to_datetime(df["t"])).dropna().sort_index()
+            if len(s)>250: return s,"SOXX ETF 還原價(代理,^SOX 抓取失敗)"
+    except Exception as e:
+        print(f"   [fail] SOXX {repr(e)[:60]}")
+    return pd.Series(dtype=float),""
 
 def fetch_gdp_yoy(cap_year):
     """台灣名目GDP年增率(IMF WEO via DBnomics,年頻)。僅取 <= cap_year 的『已實現』年份,
@@ -112,7 +140,7 @@ def get_data():
         fx["date"]=pd.to_datetime(fx["date"])
         d["usdtwd"]=fx.sort_values("date").set_index("date")["spot_sell"].astype(float)
     d["vix"]=fred("VIXCLS")
-    d["nasdaq"]=fred("NASDAQCOM")      # 美股(日)
+    d["sox"],d["sox_src"]=fetch_sox()  # 費城半導體指數(日)
     d["kospi"]=fred("SPASTT01KRM661N") # 韓股(月, OECD)
     if "idx" in d and len(d["idx"]):
         d["asof_year"]=int(d["idx"].index[-1].year)
@@ -193,11 +221,11 @@ def compute(d):
         dev=(idx/idx.rolling(240).mean()-1)*100
         R["trend_health"]=dict(val=float(dev.iloc[-1]),series=dev,unit="%",label="指數距年線",
             note="距年線乖離(不計分)")
-    nq=d.get("nasdaq")
-    if nq is not None and len(nq)>200:
-        dev=(nq/nq.rolling(200).mean()-1)*100
-        R["us_nasdaq"]=dict(val=float(dev.iloc[-1]),series=dev,unit="%",label="美股乖離(Nasdaq)",
-            note="Nasdaq 距200日均(不計分)")
+    sx=d.get("sox")
+    if sx is not None and len(sx)>200:
+        dev=(sx/sx.rolling(200).mean()-1)*100
+        R["us_sox"]=dict(val=float(dev.iloc[-1]),series=dev,unit="%",label="美股乖離(費半 SOX)",
+            note="費城半導體指數距200日均(不計分)"+("" if d.get("sox_src","").startswith("PHLX") else f";來源:{d.get('sox_src','')}"))
     kr=d.get("kospi")
     if kr is not None and len(kr)>12:
         dev=(kr/kr.rolling(12).mean()-1)*100
@@ -331,11 +359,6 @@ h1{font-size:21px;margin:0 0 3px}.sub{color:var(--ts);font-size:12.5px}
 .stile.red{border-left-color:var(--red)}.stile.warn{border-left-color:var(--warn)}.stile.ok{border-left-color:var(--ok)}
 .stile .l{font-size:11px;color:var(--ts)}.stile .v{font-size:18px;font-weight:680;margin:2px 0;font-variant-numeric:tabular-nums}
 .stile .s{font-size:10px;color:var(--muted)}
-.indbar{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 6px}
-.indbar button{font:inherit;font-size:11.5px;background:var(--bg);color:var(--ts);border:1px solid var(--border);border-radius:20px;padding:4px 10px;cursor:pointer}
-.indbar button.on{background:var(--series-1);color:#fff;border-color:var(--series-1)}
-.indcap{font-size:11px;color:var(--muted);margin-bottom:10px}
-.cic{font-size:10.5px;color:var(--ts);margin-top:5px;border-top:1px solid var(--border);padding-top:5px}
 .gtitle{font-size:12.5px;font-weight:650;margin:14px 0 8px}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 @media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
@@ -361,12 +384,12 @@ details.note summary::-webkit-details-marker{color:var(--muted)}
 .tabs a.on{background:var(--s1,var(--series-1));color:#fff;border-color:var(--s1,var(--series-1))}
 #th{position:fixed;top:12px;right:12px;background:var(--surface);color:var(--tp);border:1px solid var(--border);border-radius:8px;padding:6px 11px;cursor:pointer}
 </style></head><body><button id="th">◐</button><div class="wrap">
-<h1>台股脆弱度儀表板 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">PIT 無前視偏誤</span></h1><div class="sub">資料 FinMind + FRED · 更新於 __ASOF__ · 危險度=PIT擴張百分位(只用當日及以前) · 壓力計非擇時工具 · 非投資建議</div>
-<div class="hero"><div class="gauge" id="gauge"><div class="inner"><div><div class="num" id="cnum">–</div><div class="lb">脆弱度 / 100</div></div></div></div>
+<h1>台股脆弱度儀表板 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">PIT 無前視偏誤</span></h1><div class="sub">資料 FinMind + FRED + Yahoo · 更新於 __ASOF__ · 危險度=PIT擴張百分位(只用當日及以前) · 壓力計非擇時工具 · 非投資建議</div>
+<div class="hero"><div class="gauge" id="gauge"><div class="inner"><div><div class="num" id="cnum">–</div><div class="lb">亮紅燈數</div></div></div></div>
  <div class="txt"><div class="big" id="cjudge">–</div>
- <div class="d">慢層<b>結構脆弱度</b>定槓桿上限,快層<b>觸發</b>(VIX跳升/跌破均線)才真的降到 1x。脆弱但未觸發=不加碼、不出場。</div>
+ <div class="d">規則只有一條:<b>四個停買燈號中 ≥3 燈達 75 分 → 隔日不新買進</b>。賣出、停損照常;其他日子照常交易。</div>
  <div class="vd" id="viewdate">游標移過同步各燈號;點按固定、雙擊解除</div>
- <div class="vd" id="rednow" style="color:var(--red);font-weight:650"></div></div></div>
+ <div class="vd" id="rednow" style="font-weight:600"></div></div></div>
 <div class="trend"><div class="th"><span>個股搜尋 <span style="font-weight:400;color:var(--muted)">代號或名稱(上市/上櫃/興櫃)</span></span></div>
  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
   <input id="q" list="stocklist" placeholder="例:2330 或 台積電" style="font:inherit;background:var(--bg);color:var(--tp);border:1px solid var(--border);border-radius:8px;padding:7px 11px;min-width:220px">
@@ -380,25 +403,22 @@ details.note summary::-webkit-details-marker{color:var(--muted)}
   <div id="scmnote" style="font-size:10.5px;color:var(--muted);margin-top:4px"></div>
   <div id="scsuit" style="font-size:12.5px;margin-top:8px;padding:8px 11px;background:var(--bg);border:1px solid var(--border);border-radius:9px"></div>
   <div id="sc" style="position:relative"><svg id="scsvg"></svg><div id="sctip"></div></div>
-  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數)· 背景=剎車狀態 · 紅虛線▼=本檔出場線 · 兩圖共用游標/縮放</span><span id="scend"></span></div></div></div>
-<div class="trend"><div class="th"><span>脆弱度歷史趨勢 <span style="font-weight:400;color:var(--muted)">｜觸發敏感度 </span><select id="sens" style="font:inherit;font-size:11.5px;background:var(--bg);color:var(--tp);border:1px solid var(--border);border-radius:7px;padding:3px 6px"></select><div id="sensnote" style="font-weight:400;font-size:10.5px;color:var(--muted);margin-top:3px"></div></span>
+  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數)· 背景=停買日 · 紅虛線▼=本檔出場線 · 兩圖共用游標/縮放</span><span id="scend"></span></div></div></div>
+<div class="trend"><div class="th"><span>脆弱度歷史趨勢 <span style="font-weight:400;color:var(--muted)">(參考;停買只看四燈)</span></span>
  <span class="ctrl" id="ranges"><button data-d="244">1年</button><button data-d="732">3年</button><button data-d="1220">5年</button><button data-d="0">全部</button>
  <input type="date" id="d0"><span style="color:var(--muted)">~</span><input type="date" id="d1"></span></div>
  <div id="tc"><svg id="tcsvg"></svg><div id="tctip"></div></div>
  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:4px">
- <span>移過看數值 · 滾輪縮放 · 點按釘選</span><span>深紅=踩剎車 · 淺紅=僅觸發 · 橙=僅脆弱 · 灰=NBER衰退</span></div></div>
-<h2 id="indh" style="margin-bottom:6px">產業子分析 <span style="font-size:11px;font-weight:400;color:var(--muted)">依對該產業報酬的預測力(rank-IC)重排</span></h2>
-<div id="indbar" class="indbar"></div>
-<div class="indcap" id="indcap"></div>
-<div class="gtitle" style="color:var(--series-1)">■ 慢層 · 內部槓桿 <span style="font-weight:400;color:var(--muted)">停買燈號只計「融資綜合」;三個分項收在卡片內,需要細看再點開</span></div>
+ <span>移過看數值 · 滾輪縮放 · 點按釘選</span><span>紅底=停買日(四燈 ≥3) · 灰=NBER衰退</span></div></div>
+<div class="gtitle" style="color:var(--series-1)">■ 停買燈號 ① 融資 <span style="font-weight:400;color:var(--muted)">三個分項收在卡片內,需要細看再點開</span></div>
 <div class="grid" id="grp-internal"></div>
-<div class="gtitle" style="color:var(--series-1)">■ 慢層 · 外部資金與情緒 <span style="font-weight:400;color:var(--muted)">三項皆計入停買燈號(四燈中 ≥3 顆 ≥75 → 停買)</span></div>
+<div class="gtitle" style="color:var(--series-1)">■ 停買燈號 ②–④ 外資・台幣・VIX <span style="font-weight:400;color:var(--muted)">四燈中 ≥3 顆 ≥75 → 停買</span></div>
 <div class="grid" id="grp-external"></div>
-<div class="gtitle" style="color:var(--red)">■ 快層 · 觸發 <span style="font-weight:400;color:var(--muted)">亮起才踩剎車</span></div>
+<div class="gtitle" style="color:var(--red)">■ 參考 · 短線觸發 <span style="font-weight:400;color:var(--muted)">不影響停買</span></div>
 <div class="grid" id="grp-trigger"></div>
-<div class="gtitle" style="color:var(--muted)">■ 動能參考 <span style="font-weight:400;color:var(--muted)">不計分(乖離越大→後續回撤反而越淺)</span></div>
+<div class="gtitle" style="color:var(--muted)">■ 參考 · 動能 <span style="font-weight:400;color:var(--muted)">不影響停買(乖離越大→後續回撤反而越淺)</span></div>
 <div class="grid" id="grp-momo"></div>
-<details class="note"><summary style="cursor:pointer;font-weight:650;color:var(--tp)">方法、資料源與已知限制(點開)</summary><div style="margin-top:8px">各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>(<b>擴張視窗迴歸</b>:每日迴歸係數與標準化只用當日及以前資料,已消除「全樣本一次迴歸」造成的前視洩漏)與<b>成長率背離(vs 名目GDP)</b>雙軌:成長背離改以 <b>IMF WEO 台灣名目GDP 年增率</b>(DBnomics,年頻,僅取已實現年份、PIT 落後)為分母——把「經濟自然成長」放進分母,<b>去除用被炒高的指數當分母的泡沫污染</b>(GDP 源不可得時自動退回指數)。真 GDP 為<b>季頻、落後 1–2 月、會修正</b>,故僅用年頻已實現值當慢速結構性錨,非即時訊號。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<br><b>2026-10 停買燈號改版:</b>原「慢層 6 燈中 ≥5 顆 ≥75」裡三個融資指標高度相關(Spearman 0.69–0.80),等於融資算三票;六燈的第一主成分權重幾乎全落在融資。改為<b>四燈:融資綜合(三項以 PCA 合一,每月只用過去資料重估權重,再排 PIT 百分位)、外資流向、台幣、VIX,4 燈中 ≥3 顆 ≥75 → 停買</b>。以本帳戶 2025–26 年交易做樣本外檢驗:停買日隔日買進 106 筆勝率 7%(其餘 50%),循環平移排列檢定 p=0.001;2017 年起櫃買指數 20 日跌 ≥7% 的機率,停買日 15%、其他日 7%。門檻凍結,前瞻檢驗 3–6 個月後再檢討。<br><b>2026-07 改版(依回測修正):</b>原設計把「乖離類」指標(指數距年線、美股乖離、韓股乖離)當危險訊號,但以 2013–2026 台股樣本回測,其危險度與<b>未來60日最大回撤的 Spearman IC 為負</b>(韓股 −0.139、美股 −0.076、距年線 −0.051)——<b>漲多預測的是後續回撤較淺,不是較深</b>,計分會系統性誤殺仍在噴出的個股。且原「脆弱度≥55 即降槓桿」的撥盤,在 2018/10 與 2022 兩次真空頭中降槓桿天數僅 0% 與 5%,績效反而被「完全不用融資」支配。故改為雙層:慢層只設上限、快層才觸發。<b>但需注意:指標的預測方向跨期並不穩定</b>(例:融資超額水位 IC 在 2013–19 為 −0.119、2020–26 為 +0.112),且樣本以多頭為主,任何減碼規則天生吃虧——本改版降低誤殺,<b>不保證提升績效</b>。<br><br><b>前視偏誤有兩個層次,必須分開講:</b><br>① <b>計算層 — 已驗證乾淨。</b>各指標的危險度為 PIT 擴張百分位。以 2026-06-25 為例做截斷測試(只餵當天以前的原始資料完全重跑),當天的合成脆弱度 86.90、十項危險度與兩個觸發旗標<b>與全樣本算出來完全一致(差異 0.000000)</b>,截斷前最後 300 天亦為零差異。<br>② <b>規則層 — 存在後見之明,已量化。</b>觸發門檻、槓桿上限(1.2/1.35/1.5)、慢層採用哪六項指標、以及把乖離三項移出計分,這些都是<b>看完整段 2013–2026 樣本後才決定的</b>——換言之在 2026-06-25 當下,這一版規則並不存在。為了量化這件事,做了 walk-forward 檢驗(每年只用當年底以前的資料挑門檻、隔年才套用):無後見之明版 CAGR <b>+25.5%</b>/最大回撤 −31.2%,對照本頁採用的門檻 <b>+25.6%</b>/−31.7%,<b>後見之明僅灌水約 0.1 個百分點</b>(四個門檻表現本就接近,績效不是靠挑門檻挑出來的)。<br><b>但這個檢驗只涵蓋「門檻」這一個參數。</b>更上層的結構性決策(雙層架構本身、慢層指標的取捨、以 VIX 跳升當觸發)屬於設計選擇,無法用同樣方式前推檢驗,<b>那部分的後見之明仍然存在且無法量化</b>;加上樣本期幾乎全為多頭、僅涵蓋一個市場循環,請據此折價看待所有回測數字。<b>本頁為風險框架,非投資建議。</b></div></details></div>
+<details class="note"><summary style="cursor:pointer;font-weight:650;color:var(--tp)">方法、資料源與已知限制(點開)</summary><div style="margin-top:8px">各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>(<b>擴張視窗迴歸</b>:每日迴歸係數與標準化只用當日及以前資料,已消除「全樣本一次迴歸」造成的前視洩漏)與<b>成長率背離(vs 名目GDP)</b>雙軌:成長背離改以 <b>IMF WEO 台灣名目GDP 年增率</b>(DBnomics,年頻,僅取已實現年份、PIT 落後)為分母——把「經濟自然成長」放進分母,<b>去除用被炒高的指數當分母的泡沫污染</b>(GDP 源不可得時自動退回指數)。真 GDP 為<b>季頻、落後 1–2 月、會修正</b>,故僅用年頻已實現值當慢速結構性錨,非即時訊號。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<br><b>2026-10 停買燈號改版:</b>原「慢層 6 燈中 ≥5 顆 ≥75」裡三個融資指標高度相關(Spearman 0.69–0.80),等於融資算三票;六燈的第一主成分權重幾乎全落在融資。改為<b>四燈:融資綜合(三項以 PCA 合一,每月只用過去資料重估權重,再排 PIT 百分位)、外資流向、台幣、VIX,4 燈中 ≥3 顆 ≥75 → 停買</b>。以本帳戶 2025–26 年交易做樣本外檢驗:停買日隔日買進 106 筆勝率 7%(其餘 50%),循環平移排列檢定 p=0.001;2017 年起櫃買指數 20 日跌 ≥7% 的機率,停買日 15%、其他日 7%。門檻凍結,前瞻檢驗 3–6 個月後再檢討。頁面同時簡化為只顯示這條規則:原本的槓桿上限(1.2/1.35/1.5x)、觸發後降到 1.0x 與觸發敏感度旋鈕已移除,圖上紅底改為停買日;脆弱度合成分數與觸發、動能指標保留作參考,不影響停買。<br><b>2026-07 改版(依回測修正):</b>原設計把「乖離類」指標(指數距年線、美股乖離、韓股乖離)當危險訊號,但以 2013–2026 台股樣本回測,其危險度與<b>未來60日最大回撤的 Spearman IC 為負</b>(韓股 −0.139、美股 −0.076、距年線 −0.051)——<b>漲多預測的是後續回撤較淺,不是較深</b>,計分會系統性誤殺仍在噴出的個股。且原「脆弱度≥55 即降槓桿」的撥盤,在 2018/10 與 2022 兩次真空頭中降槓桿天數僅 0% 與 5%,績效反而被「完全不用融資」支配。故改為雙層:慢層只設上限、快層才觸發。<b>但需注意:指標的預測方向跨期並不穩定</b>(例:融資超額水位 IC 在 2013–19 為 −0.119、2020–26 為 +0.112),且樣本以多頭為主,任何減碼規則天生吃虧——本改版降低誤殺,<b>不保證提升績效</b>。<br><br><b>前視偏誤有兩個層次,必須分開講:</b><br>① <b>計算層 — 已驗證乾淨。</b>各指標的危險度為 PIT 擴張百分位。以 2026-06-25 為例做截斷測試(只餵當天以前的原始資料完全重跑),當天的合成脆弱度 86.90、十項危險度與兩個觸發旗標<b>與全樣本算出來完全一致(差異 0.000000)</b>,截斷前最後 300 天亦為零差異。<br>② <b>規則層 — 存在後見之明,已量化。</b>觸發門檻、槓桿上限(1.2/1.35/1.5)、慢層採用哪六項指標、以及把乖離三項移出計分,這些都是<b>看完整段 2013–2026 樣本後才決定的</b>——換言之在 2026-06-25 當下,這一版規則並不存在。為了量化這件事,做了 walk-forward 檢驗(每年只用當年底以前的資料挑門檻、隔年才套用):無後見之明版 CAGR <b>+25.5%</b>/最大回撤 −31.2%,對照本頁採用的門檻 <b>+25.6%</b>/−31.7%,<b>後見之明僅灌水約 0.1 個百分點</b>(四個門檻表現本就接近,績效不是靠挑門檻挑出來的)。<br><b>但這個檢驗只涵蓋「門檻」這一個參數。</b>更上層的結構性決策(雙層架構本身、慢層指標的取捨、以 VIX 跳升當觸發)屬於設計選擇,無法用同樣方式前推檢驗,<b>那部分的後見之明仍然存在且無法量化</b>;加上樣本期幾乎全為多頭、僅涵蓋一個市場循環,請據此折價看待所有回測數字。<b>本頁為風險框架,非投資建議。</b></div></details></div>
 </div>
 <script>__APPJS__</script>
 <script>document.getElementById('th').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')=='dark'?'light':'dark');if(window.__redraw)window.__redraw();};
@@ -435,37 +455,28 @@ const SENS=[
 ];
 let SI=1;                                   // 預設「標準」:回測覆蓋率與報酬皆優於原設定,回撤相同
 function trigAt(i){try{return SENS[SI].f(i)?1:0;}catch(e){return (D.trig&&D.trig[i])?1:0;}}
-function brakeState(i){const c=D.comp[i],t=trigAt(i);
+function brakeState(i){return redCount(i)>=(D.stopn||5)?'brake':'ok';}
+function brakeStateOld(i){const c=D.comp[i],t=trigAt(i);
  if(t&&c>=75)return 'brake';        // 又脆弱又已觸發 → 真的降
  if(t)return 'trig';                // 已觸發但結構不脆弱 → 短線避險
  if(c>=75)return 'fragile';         // 脆弱但沒觸發 → 只是不加碼(不出場)
  return 'ok';}
-function gauge(i){const c=D.comp[i];$('gauge').style.setProperty('--v',c.toFixed(0));
- $('gauge').style.setProperty('--gc','var(--'+light(c)+')');$('cnum').textContent=c.toFixed(0);
- const cap=levCap(c),st=brakeState(i),tg=trigAt(i);
- const tv=tg&&VIXD[i]!=null&&VIXD[i]>=SENS[SI].v;
- const tm=tg&&TRV[i]!=null&&TRV[i]<0;
- const tb=tg&&SI>=2&&D.ma60br&&D.ma60br[i]===1;
- const td=tg&&SI>=3&&D.r20&&D.r20[i]!=null&&D.r20[i]<-3;
- const why=[tv?'VIX跳升':null,tm?'跌破年線':null,tb?'跌破季線':null,td?'20日跌逾3%':null].filter(Boolean).join('＋')||'趨勢轉弱';
- var cj=$('cjudge');
- const act=levNow(i);
- if(st==='brake'){cj.innerHTML='🔴 <b style="color:var(--red)">踩剎車 → 1.0x</b> <span style="font-size:13px;color:var(--ts)">脆弱'+c.toFixed(0)+' + '+why+'</span>';}
- else if(st==='trig'){cj.innerHTML='🟠 <b style="color:var(--warn)">短線避險 → 1.0x</b> <span style="font-size:13px;color:var(--ts)">'+why+'(結構'+c.toFixed(0)+')</span>';}
- else if(st==='fragile'){cj.innerHTML='🟡 <b style="color:var(--warn)">不加碼,不出場 → 上限 '+cap.toFixed(2)+'x</b> <span style="font-size:13px;color:var(--ts)">脆弱'+c.toFixed(0)+',未觸發</span>';}
- else{cj.innerHTML='🟢 <b>融資可用 → 上限 '+cap.toFixed(2)+'x</b>';}
- const rc=redCount(i);
- $('rednow').innerHTML=(D.dates[i]===D.dates[b]?'':D.dates[i]+' · ')
-  +'曝險 <b>'+levNow(i).toFixed(2)+'x</b> · 觸發 '
-  +(tg?'<b style="color:var(--red)">是</b>':'<b style="color:var(--ok)">否</b>')
-  +' · 亮紅 '+rc+'/'+NSLOW+' · '+(rc>=(D.stopn||5)?'<b style="color:var(--red)">停買</b>':'<b style="color:var(--ok)">可買</b>');}
+function stopAt(i){return redCount(i)>=(D.stopn||5);}
+function gauge(i){const rc=redCount(i),stop=stopAt(i);
+ $('gauge').style.setProperty('--v',(rc/NSLOW*100).toFixed(0));
+ $('gauge').style.setProperty('--gc',stop?'var(--red)':'var(--ok)');$('cnum').textContent=rc+'/'+NSLOW;
+ $('cjudge').innerHTML=stop?'⛔ <b style="color:var(--red)">停買可賣</b> <span style="font-size:13px;color:var(--ts)">下一交易日不新買進,賣出、停損照常</span>'
+  :'✅ <b style="color:var(--ok)">可買</b> <span style="font-size:13px;color:var(--ts)">照常交易</span>';
+ const nm={margin_combo:'融資綜合',foreign_flow:'外資',fx_pressure:'台幣',vix_level:'VIX'};
+ $('rednow').innerHTML=(D.dates[i]===D.dates[b]?'':D.dates[i]+' · ')+(D.slow||[]).map(k=>{const dg=D.inds[k].dng[i];const on=dg!=null&&dg>=75;
+   return '<span style="color:'+(on?'var(--red)':'var(--ok)')+'">'+(on?'●':'○')+' '+(nm[k]||D.inds[k].label)+' '+(dg==null?'–':Math.round(dg))+'</span>';}).join(' · ');}
 // ---- cards ----
 function cardHTML(k,extra){const c=D.inds[k];
  const tag=(D.slow||[]).includes(k)?' <span style="font-size:10.5px;color:var(--series-1);font-weight:600">● 計入停買</span>':'';
  return '<div class="card" id="cd-'+k+'"><div class="ct">'+c.label+tag+'</div><div class="cv" id="cv-'+k+'">–</div>'
  +'<div class="cbarwrap"><div class="cbar" id="cb-'+k+'"></div></div><div class="cp" id="cp-'+k+'"></div>'
  +'<div class="cs" id="cs-'+k+'"></div><div class="cn">'+c.note+'</div>'
- +'<div class="cic" id="cic-'+k+'"></div>'+(extra||'')+'</div>';}
+ +(extra||'')+'</div>';}
 const MSUB=['margin_resid_z','margin_yoy_div','margin_roc'];
 function buildCards(){
  const subs=MSUB.filter(k=>D.inds[k]),nest=!!D.inds['margin_combo']&&subs.length>0;
@@ -474,29 +485,6 @@ function buildCards(){
    if(!ks.length)$(el).style.display='none';};
  g('內部槓桿','grp-internal'); g('外部資金情緒','grp-external');
  g('觸發層','grp-trigger');    g('動能參考','grp-momo');}
-// ---- 產業預測力(rank-IC) ----
-let curInd=(D.indorder&&D.indorder.length)?(D.indorder.includes('全市場')?'全市場':D.indorder[0]):null;
-function rankify(arr){const idx=arr.map((v,i)=>[v,i]).sort((p,q)=>p[0]-q[0]);const r=new Array(arr.length);
- let i=0;while(i<idx.length){let j=i;while(j+1<idx.length&&idx[j+1][0]===idx[i][0])j++;const avg=(i+j)/2+1;for(let k=i;k<=j;k++)r[idx[k][1]]=avg;i=j+1;}return r;}
-function pearson(x,y){const n=x.length;if(n<10)return null;let mx=0,my=0;for(let i=0;i<n;i++){mx+=x[i];my+=y[i];}mx/=n;my/=n;
- let sxy=0,sx=0,sy=0;for(let i=0;i<n;i++){const dx=x[i]-mx,dy=y[i]-my;sxy+=dx*dy;sx+=dx*dx;sy+=dy*dy;}return (sx>0&&sy>0)?sxy/Math.sqrt(sx*sy):null;}
-function computeIC(ind){const lv=D.industries[ind],H=D.H||20,res={};if(!lv)return res;const hi=Math.min(b,N-1-H);
- for(const k of D.order){const val=D.inds[k].val,xs=[],ys=[];
-  for(let t=a;t<=hi;t++){const v=val[t],p0=lv[t],p1=lv[t+H];if(v==null||p0==null||p1==null||p0<=0)continue;xs.push(v);ys.push(p1/p0-1);}
-  res[k]=(xs.length>=15)?pearson(rankify(xs),rankify(ys)):null;}
- return res;}
-function buildIndBar(){const bar=$('indbar');if(!D.indorder||!D.indorder.length){bar.style.display='none';$('indh').style.display='none';return;}
- bar.innerHTML=D.indorder.map(n=>'<button data-ind="'+n+'"'+(n===curInd?' class="on"':'')+'>'+n+'</button>').join('');
- bar.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{curInd=btn.dataset.ind;
-  bar.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.ind===curInd));applyRanking();});}
-function applyRanking(){if(!curInd)return;const ic=computeIC(curInd);
- ['內部','外部'].forEach(gname=>{const keys=D.order.filter(k=>D.inds[k].group===gname);
-  const ranked=keys.filter(k=>ic[k]!=null).sort((p,q)=>Math.abs(ic[q])-Math.abs(ic[p]));
-  const rest=keys.filter(k=>ic[k]==null);
-  [...ranked,...rest].forEach((k,i)=>{const cd=$('cd-'+k);if(cd)cd.style.order=i;const v=ic[k];const el=$('cic-'+k);if(!el)return;
-   el.innerHTML=(v==null)?'<span style="color:var(--muted)">對'+curInd+'報酬 IC —</span>'
-    :'對'+curInd+'報酬 IC <b style="color:'+(Math.abs(v)>=0.2?'var(--series-1)':'var(--ts)')+'">'+(v>=0?'+':'')+v.toFixed(2)+'</b>'+(i<ranked.length?' · 組內第'+(i+1)+'名':'');});});
- $('indcap').textContent='依「'+curInd+'」未來'+(D.H||20)+'日報酬的預測力(Spearman rank-IC;|IC|大=預測力強;各組內排序;區間 '+D.dates[a]+' ~ '+D.dates[b]+')';}
 function cardSpark(k){const v=D.inds[k].val.slice(a,b+1).filter(x=>x!=null);if(v.length<3)return '';
  const lo=Math.min(...v),hi=Math.max(...v),w=150,h=30;
  let p='';for(let i=0;i<v.length;i++)p+=(i?'L':'M')+(i/(v.length-1)*w).toFixed(1)+' '+(h-2-(v[i]-lo)/((hi-lo)||1)*(h-4)).toFixed(1)+' ';
@@ -521,7 +509,7 @@ function renderTrend(){curA=a;curB=b;W=box.clientWidth||800;plotW=W-padL-padR;pl
   g+='<rect x="'+xs+'" y="'+padT+'" width="'+Math.max(2,xe-xs)+'" height="'+plotH+'" fill="var(--muted)" opacity="0.30"/>';
   g+='<text x="'+((xs+xe)/2)+'" y="'+(padT+10)+'" font-size="9" fill="var(--ts)" text-anchor="middle">NBER衰退</text>';});
  // 同時進紅區項數光譜(6→10, 色深遞增)
- // 背景 = 雙層剎車狀態:深紅=脆弱且已觸發(真的降槓桿)、淺紅=僅觸發、橙=僅結構脆弱(不加碼但不出場)
+ // 背景 = 停買日(四燈 ≥3)
  const cw=plotW/Math.max(1,curB-curA);
  for(let i=curA;i<=curB;i++){const st=brakeState(i);if(st==='ok')continue;
    const col=(st==='fragile')?'var(--warn)':'var(--red)';
@@ -556,7 +544,7 @@ function showAt(i){sel=i;const x=X(i),y=Y(D.comp[i]);
  $('tcx').setAttribute('x1',x);$('tcx').setAttribute('x2',x);$('tcx').setAttribute('opacity',pinned?'0.6':'0.35');
  $('tcd').setAttribute('cx',x);$('tcd').setAttribute('cy',y);$('tcd').setAttribute('opacity','1');
  const rc=redCount(i);tip.style.opacity='1';
- tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>紅區 '+rc+'/'+NSLOW+(brakeState(i)==='brake'?' ⚠踩剎車':'');
+ tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>亮紅 '+rc+'/'+NSLOW+(brakeState(i)==='brake'?' ⛔停買可賣':'');
  let tx=x+12;if(tx>W-104)tx=x-104;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';
  $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(← → 鍵逐日移動,Shift 一次 20 日;移動任一圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
  gauge(i);renderCards(i);
@@ -579,7 +567,7 @@ function clearBtns(){document.querySelectorAll('#ranges button,#scranges button'
 function applyWindow(d0,d1){                    // d0,d1:日期字串,兩張圖同步套用
  a=idxForTs(Date.parse(d0));b=idxForTs(Date.parse(d1));sel=b;
  $('d0').value=D.dates[a];$('d1').value=D.dates[b];
- renderTrend();gauge(sel);renderCards(sel);applyRanking();
+ renderTrend();gauge(sel);renderCards(sel);
  if(SD){SA=scIdxForDate(d0);SB=scIdxForDate(d1);drawStock();}
 }
 // ── 滾輪縮放:游標進到圖框內滾動即可放大/縮小,兩張圖共用同一時間窗 ──
@@ -610,7 +598,7 @@ function wheelZoom(ev,idxFn){
 }
 function sharedDays(days){b=N-1;a=days<=0?0:Math.max(0,N-days);markBtns(days);applyWindow(D.dates[a],D.dates[b]);}
 function sharedDates(d0,d1){if(!d0||!d1||Date.parse(d0)>=Date.parse(d1))return;clearBtns();applyWindow(d0,d1);}
-window.__redraw=function(){renderTrend();if(SD)drawStock();gauge(sel);renderCards(sel);applyRanking();};
+window.__redraw=function(){renderTrend();if(SD)drawStock();gauge(sel);renderCards(sel);};
 // events(脆弱度圖的控制)
 document.querySelectorAll('#ranges button').forEach(btn=>btn.onclick=()=>sharedDays(+btn.dataset.d));
 $('d0').onchange=()=>sharedDates($('d0').value,$('d1').value);
@@ -862,7 +850,7 @@ function updateSuit(){const el=$('scsuit');if(!el||!SD)return;
  if(avg>=70||pb>=15){v='不宜融資持有(系統高壓)';col='var(--red)';}
  else if(avg>=55||pb>=5){v='融資需謹慎';col='var(--warn)';}
  else{v='系統壓力低,相對適合';col='var(--ok)';}
- let h='此區間 脆弱度均 <b>'+avg.toFixed(0)+'</b>/峰 '+mx.toFixed(0)+' · 踩剎車 <b>'+pb.toFixed(0)+'%</b> → <b style="color:'+col+'">'+v+'</b>';
+ let h='此區間停買日 <b>'+pb.toFixed(0)+'%</b>(四燈 ≥3)';
  const s=SD.exstats;
  if(s&&s.trades>0){
   h+='<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">'
@@ -885,9 +873,9 @@ function buildSens(){const el=$('sens');if(!el)return;
  el.innerHTML=SENS.map((x,i)=>'<option value="'+i+'"'+(i===SI?' selected':'')+'>'+x.n+'</option>').join('');
  $('sensnote').textContent=sensLabel();
  el.onchange=()=>{SI=+el.value;$('sensnote').textContent=sensLabel();
-  renderTrend();gauge(sel);renderCards(sel);applyRanking();if(SD)drawStock();};}
+  renderTrend();gauge(sel);renderCards(sel);if(SD)drawStock();};}
 // init
-buildCards();buildIndBar();buildSens();setupSearch();syncInputs();markBtns(732);renderTrend();gauge(b);renderCards(b);applyRanking();
+buildCards();setupSearch();syncInputs();markBtns(732);renderTrend();gauge(b);renderCards(b);
 """
 
 def main():
@@ -896,18 +884,6 @@ def main():
         print("資料抓取失敗(可能遇速率限制),稍後重試"); sys.exit(1)
     R=compute(d)
     app=build_app_data(d,R)
-    # 產業子分析:嵌入各產業等權報酬序列(對齊到儀表板日期)
-    app["industries"]={}; app["indorder"]=[]; app["H"]=20
-    try:
-        ir=json.load(open("industry_returns.json"))
-        pos={dt:i for i,dt in enumerate(ir["dates"])}
-        def alg(lv):
-            return [round(lv[pos[dt]],1) if (dt in pos and lv[pos[dt]] is not None) else None for dt in app["dates"]]
-        app["industries"]={n:alg(v) for n,v in ir["industries"].items()}
-        app["indorder"]=(["全市場"] if "全市場" in app["industries"] else [])+sorted(k for k in app["industries"] if k!="全市場")
-        print(f"   已嵌入 {len(app['industries'])} 個產業報酬序列")
-    except Exception as e:
-        print("   (無 industry_returns.json,略過產業子分析)")
     # 全市場代號名錄(含上市/上櫃/興櫃)供搜尋
     try:
         info=fm("TaiwanStockInfo")
