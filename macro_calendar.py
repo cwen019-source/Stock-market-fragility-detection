@@ -339,13 +339,13 @@ def render(data):
     more = f'<button class="more" data-n="{len(evs)}" data-noi18n></button>' if n_lo else ""
     return (f'<!--MACROCAL-->{CSS}<div class="mcal" id="mcal">'
             f'<div class="mh"><span class="mt">{B("未來三個月 · 美國關鍵數據與 FOMC", "Next 3 months · key US data & FOMC")}</span>'
-            f'<span class="ms">{B(f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 台灣時間 · {len(evs)} 項,其中 {n5} 項最高重要度(FOMC/非農/CPI)", f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d} · Taiwan time · {len(evs)} events, {n5} top-importance (FOMC / payrolls / CPI)")}'
+            f'<span class="ms">{B(f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d} · 台灣時間", f"{start:%Y-%m-%d} ~ {end:%Y-%m-%d} · Taiwan time")}'
             f'{" · " + "/".join(stale) + B(" 沿用舊日期", " using last known dates") if stale else ""}</span></div>'
             f'<div class="nx" id="mcal-next" data-noi18n></div>'
             f'<div class="strip">{bars}</div><div class="wl">{"".join(labels)}</div>'
-            f'<div class="lg">{B("每週不確定性密度 = 當週事件重要度加總:", "Weekly uncertainty density = sum of event importance that week: ")}<span style="color:var(--red)">■</span> {B("高", "high")} '
+            f'<div class="lg">{B("每週事件重要度:", "Weekly event importance: ")}<span style="color:var(--red)">■</span> {B("高", "high")} '
             f'<span style="color:var(--warn)">■</span> {B("中", "medium")} <span style="color:var(--series-1)">■</span> {B("低", "low")} · '
-            f'<span style="color:var(--red)">●</span> {B("FOMC 週。這些日子波動通常放大,脆弱度高時更要留意。", "FOMC week. Volatility usually rises around these dates — take extra care when fragility is high.")}</div>'
+            f'<span style="color:var(--red)">●</span> {B("FOMC 週", "FOMC week")}</div>'
             f'<ul>{"".join(items)}</ul>{more}</div>{JS}<!--/MACROCAL-->\n')
 
 

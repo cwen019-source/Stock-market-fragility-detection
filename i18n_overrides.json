@@ -44,5 +44,22 @@
  "亮紅 ": "red ",
  "停買可賣": "Stop buying, selling OK",
  "下一交易日不新買進,賣出、停損照常": "no new buys next trading day; sells and stop-losses as normal",
- "⛔停買可賣": "⛔ stop buying, selling OK"
+ "⛔停買可賣": "⛔ stop buying, selling OK",
+ "方法論(點開)": "Methodology (click to expand)",
+ "停買規則": "Stop-buy rule",
+ ":前一交易日收盤,四個停買燈號中有 ≥3 燈危險度 ≥75 → 下一交易日不新買進;賣出、停損照常。": ": at the previous close, if 3 or more of the 4 stop-buy lights score 75+, make no new buys the next trading day; sells and stop-losses as normal.",
+ "危險度": "Danger score",
+ ":各指標以 PIT 擴張百分位計算(第 t 日只與當日及以前的歷史比較,滿一年才起算),0–100,越高越危險;VIX 與外資流向反向計分(越低越危險)。": ": each indicator is ranked as a point-in-time expanding percentile (day t is compared only with history up to that day; starts after one year), 0–100, higher = more dangerous; VIX and foreign flow are inverted (lower = more dangerous).",
+ "四個停買燈號": "Four stop-buy lights",
+ ":① 融資綜合:融資超額水位(去趨勢殘差)、融資成長 vs 名目 GDP 背離、融資半年擴張,三項高度相關,以 PCA 合一(每月只用過去資料重估權重),再算危險度;② 外資 20 日淨流向;③ 台幣 20 日變動;④ VIX 水準。": ": ① Combined margin: excess margin level (detrended residual), margin growth vs nominal GDP, and 6-month margin growth are highly correlated and merged by PCA (weights re-estimated monthly from past data only); ② foreign 20-day net flow; ③ TWD 20-day move; ④ VIX level.",
+ "參考指標(不影響停買)": "Reference indicators (do not affect stop-buy)",
+ ":脆弱度合成分數、VIX 5 日跳升、指數距年線、費半與韓股乖離。": ": composite fragility score, VIX 5-day jump, index vs 240-day MA, SOX and KOSPI deviations.",
+ "驗證": "Validation",
+ ":門檻 75 與 ≥3 燈事前固定,未以交易資料調整。以實際交易檢驗,停買日隔日的買進 106 筆勝率 7%,其他買進 1,424 筆勝率 50%(排列檢定 p≈0.001);2017 年起停買日後 20 日櫃買指數跌 ≥7% 的機率 15%,其他日 7%。": ": the 75 threshold and 3-of-4 rule were fixed in advance, not tuned on trades. On actual trades, 106 buys made the day after a stop-buy day won 7% vs 50% for the other 1,424 (permutation test p≈0.001); since 2017 the OTC index fell 7%+ within 20 days after 15% of stop-buy days vs 7% of other days.",
+ "限制": "Limits",
+ ":停買日集中在 2026 年兩段壓力期,樣本小;本頁為風險控管工具,非投資建議。": ": stop-buy days cluster in two 2026 stress episodes, so the sample is small. A risk-control tool, not investment advice.",
+ "四燈中 ≥3 燈達 75 分 → 隔日不新買進": "3+ of 4 lights at 75+ → no new buys next day",
+ ";賣出、停損照常。": "; sells and stop-losses as normal.",
+ "背景=停買日 · 紅虛線▼=本檔出場線": "Background = stop-buy days · red dashed ▼ = this stock's exit line",
+ "📌 已固定(點兩下取消)": "📌 pinned (double-click to release)"
 }

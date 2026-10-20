@@ -225,7 +225,7 @@ def compute(d):
     if sx is not None and len(sx)>200:
         dev=(sx/sx.rolling(200).mean()-1)*100
         R["us_sox"]=dict(val=float(dev.iloc[-1]),series=dev,unit="%",label="美股乖離(費半 SOX)",
-            note="費城半導體指數距200日均(不計分)"+("" if d.get("sox_src","").startswith("PHLX") else f";來源:{d.get('sox_src','')}"))
+            note="費城半導體指數距200日均(不計分)")
     kr=d.get("kospi")
     if kr is not None and len(kr)>12:
         dev=(kr/kr.rolling(12).mean()-1)*100
@@ -282,7 +282,7 @@ def build_app_data(d, R):
         cv=pit_pct(score.values)
         wtxt="、".join(f"{aligned[k]['label']} {x:.2f}" for k,x in zip(MARGIN3,wlast)) if wlast is not None else "暖身中"
         aligned["margin_combo"]=dict(label="融資綜合(三項合一)",unit="",fmt=[1,2,""],group="內部槓桿",
-            note=f"三項融資指標以 PCA 合成,每月只用過去資料重估權重(目前:{wtxt}),再排歷史百分位。計入停買燈號",
+            note=f"三項融資指標以 PCA 合一(權重 {wtxt})",
             val=[None if pd.isna(x) else round(float(x),2) for x in score.values],
             dng=[None if x is None else int(round(x)) for x in cv])
     cols=list(dmat.columns); wvec=np.array([WEIGHTS.get(k,1.0) for k in cols])
@@ -384,11 +384,10 @@ details.note summary::-webkit-details-marker{color:var(--muted)}
 .tabs a.on{background:var(--s1,var(--series-1));color:#fff;border-color:var(--s1,var(--series-1))}
 #th{position:fixed;top:12px;right:12px;background:var(--surface);color:var(--tp);border:1px solid var(--border);border-radius:8px;padding:6px 11px;cursor:pointer}
 </style></head><body><button id="th">◐</button><div class="wrap">
-<h1>台股脆弱度儀表板 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">PIT 無前視偏誤</span></h1><div class="sub">資料 FinMind + FRED + Yahoo · 更新於 __ASOF__ · 危險度=PIT擴張百分位(只用當日及以前) · 壓力計非擇時工具 · 非投資建議</div>
+<h1>台股脆弱度儀表板</h1><div class="sub">更新於 __ASOF__ · 非投資建議</div>
 <div class="hero"><div class="gauge" id="gauge"><div class="inner"><div><div class="num" id="cnum">–</div><div class="lb">亮紅燈數</div></div></div></div>
  <div class="txt"><div class="big" id="cjudge">–</div>
- <div class="d">規則只有一條:<b>四個停買燈號中 ≥3 燈達 75 分 → 隔日不新買進</b>。賣出、停損照常;其他日子照常交易。</div>
- <div class="vd" id="viewdate">游標移過同步各燈號;點按固定、雙擊解除</div>
+ <div class="vd" id="viewdate"></div>
  <div class="vd" id="rednow" style="font-weight:600"></div></div></div>
 <div class="trend"><div class="th"><span>個股搜尋 <span style="font-weight:400;color:var(--muted)">代號或名稱(上市/上櫃/興櫃)</span></span></div>
  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -398,18 +397,18 @@ details.note summary::-webkit-details-marker{color:var(--muted)}
   <span id="qmsg" style="font-size:12px;color:var(--muted)"></span></div>
  <div id="scwrap" style="display:none;margin-top:10px"><div id="sctitle" style="font-size:14px;font-weight:650;margin-bottom:4px"></div>
   <div class="ctrl" id="scranges" style="margin:0 0 6px"><button data-d="244">1年</button><button data-d="732">3年</button><button data-d="1220">5年</button><button data-d="0" class="on">全部</button>
-   <span style="color:var(--muted);font-size:11px">(日期範圍見下方脆弱度圖,兩圖共用)</span></div>
+</div>
   <div id="scstats" class="scstats"></div>
   <div id="scmnote" style="font-size:10.5px;color:var(--muted);margin-top:4px"></div>
   <div id="scsuit" style="font-size:12.5px;margin-top:8px;padding:8px 11px;background:var(--bg);border:1px solid var(--border);border-radius:9px"></div>
   <div id="sc" style="position:relative"><svg id="scsvg"></svg><div id="sctip"></div></div>
-  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>還原股價(對數)· 背景=停買日 · 紅虛線▼=本檔出場線 · 兩圖共用游標/縮放</span><span id="scend"></span></div></div></div>
+  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>背景=停買日 · 紅虛線▼=本檔出場線</span><span id="scend"></span></div></div></div>
 <div class="trend"><div class="th"><span>脆弱度歷史趨勢 <span style="font-weight:400;color:var(--muted)">(參考;停買只看四燈)</span></span>
  <span class="ctrl" id="ranges"><button data-d="244">1年</button><button data-d="732">3年</button><button data-d="1220">5年</button><button data-d="0">全部</button>
  <input type="date" id="d0"><span style="color:var(--muted)">~</span><input type="date" id="d1"></span></div>
  <div id="tc"><svg id="tcsvg"></svg><div id="tctip"></div></div>
  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:4px">
- <span>移過看數值 · 滾輪縮放 · 點按釘選</span><span>紅底=停買日(四燈 ≥3) · 灰=NBER衰退</span></div></div>
+ <span></span><span>紅底=停買日(四燈 ≥3) · 灰=NBER衰退</span></div></div>
 <div class="gtitle" style="color:var(--series-1)">■ 停買燈號 ① 融資 <span style="font-weight:400;color:var(--muted)">三個分項收在卡片內,需要細看再點開</span></div>
 <div class="grid" id="grp-internal"></div>
 <div class="gtitle" style="color:var(--series-1)">■ 停買燈號 ②–④ 外資・台幣・VIX <span style="font-weight:400;color:var(--muted)">四燈中 ≥3 顆 ≥75 → 停買</span></div>
@@ -418,7 +417,14 @@ details.note summary::-webkit-details-marker{color:var(--muted)}
 <div class="grid" id="grp-trigger"></div>
 <div class="gtitle" style="color:var(--muted)">■ 參考 · 動能 <span style="font-weight:400;color:var(--muted)">不影響停買(乖離越大→後續回撤反而越淺)</span></div>
 <div class="grid" id="grp-momo"></div>
-<details class="note"><summary style="cursor:pointer;font-weight:650;color:var(--tp)">方法、資料源與已知限制(點開)</summary><div style="margin-top:8px">各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>(<b>擴張視窗迴歸</b>:每日迴歸係數與標準化只用當日及以前資料,已消除「全樣本一次迴歸」造成的前視洩漏)與<b>成長率背離(vs 名目GDP)</b>雙軌:成長背離改以 <b>IMF WEO 台灣名目GDP 年增率</b>(DBnomics,年頻,僅取已實現年份、PIT 落後)為分母——把「經濟自然成長」放進分母,<b>去除用被炒高的指數當分母的泡沫污染</b>(GDP 源不可得時自動退回指數)。真 GDP 為<b>季頻、落後 1–2 月、會修正</b>,故僅用年頻已實現值當慢速結構性錨,非即時訊號。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<br><b>2026-10 停買燈號改版:</b>原「慢層 6 燈中 ≥5 顆 ≥75」裡三個融資指標高度相關(Spearman 0.69–0.80),等於融資算三票;六燈的第一主成分權重幾乎全落在融資。改為<b>四燈:融資綜合(三項以 PCA 合一,每月只用過去資料重估權重,再排 PIT 百分位)、外資流向、台幣、VIX,4 燈中 ≥3 顆 ≥75 → 停買</b>。以本帳戶 2025–26 年交易做樣本外檢驗:停買日隔日買進 106 筆勝率 7%(其餘 50%),循環平移排列檢定 p=0.001;2017 年起櫃買指數 20 日跌 ≥7% 的機率,停買日 15%、其他日 7%。門檻凍結,前瞻檢驗 3–6 個月後再檢討。頁面同時簡化為只顯示這條規則:原本的槓桿上限(1.2/1.35/1.5x)、觸發後降到 1.0x 與觸發敏感度旋鈕已移除,圖上紅底改為停買日;脆弱度合成分數與觸發、動能指標保留作參考,不影響停買。<br><b>2026-07 改版(依回測修正):</b>原設計把「乖離類」指標(指數距年線、美股乖離、韓股乖離)當危險訊號,但以 2013–2026 台股樣本回測,其危險度與<b>未來60日最大回撤的 Spearman IC 為負</b>(韓股 −0.139、美股 −0.076、距年線 −0.051)——<b>漲多預測的是後續回撤較淺,不是較深</b>,計分會系統性誤殺仍在噴出的個股。且原「脆弱度≥55 即降槓桿」的撥盤,在 2018/10 與 2022 兩次真空頭中降槓桿天數僅 0% 與 5%,績效反而被「完全不用融資」支配。故改為雙層:慢層只設上限、快層才觸發。<b>但需注意:指標的預測方向跨期並不穩定</b>(例:融資超額水位 IC 在 2013–19 為 −0.119、2020–26 為 +0.112),且樣本以多頭為主,任何減碼規則天生吃虧——本改版降低誤殺,<b>不保證提升績效</b>。<br><br><b>前視偏誤有兩個層次,必須分開講:</b><br>① <b>計算層 — 已驗證乾淨。</b>各指標的危險度為 PIT 擴張百分位。以 2026-06-25 為例做截斷測試(只餵當天以前的原始資料完全重跑),當天的合成脆弱度 86.90、十項危險度與兩個觸發旗標<b>與全樣本算出來完全一致(差異 0.000000)</b>,截斷前最後 300 天亦為零差異。<br>② <b>規則層 — 存在後見之明,已量化。</b>觸發門檻、槓桿上限(1.2/1.35/1.5)、慢層採用哪六項指標、以及把乖離三項移出計分,這些都是<b>看完整段 2013–2026 樣本後才決定的</b>——換言之在 2026-06-25 當下,這一版規則並不存在。為了量化這件事,做了 walk-forward 檢驗(每年只用當年底以前的資料挑門檻、隔年才套用):無後見之明版 CAGR <b>+25.5%</b>/最大回撤 −31.2%,對照本頁採用的門檻 <b>+25.6%</b>/−31.7%,<b>後見之明僅灌水約 0.1 個百分點</b>(四個門檻表現本就接近,績效不是靠挑門檻挑出來的)。<br><b>但這個檢驗只涵蓋「門檻」這一個參數。</b>更上層的結構性決策(雙層架構本身、慢層指標的取捨、以 VIX 跳升當觸發)屬於設計選擇,無法用同樣方式前推檢驗,<b>那部分的後見之明仍然存在且無法量化</b>;加上樣本期幾乎全為多頭、僅涵蓋一個市場循環,請據此折價看待所有回測數字。<b>本頁為風險框架,非投資建議。</b></div></details></div>
+<details class="note"><summary style="cursor:pointer;font-weight:650;color:var(--tp)">方法論(點開)</summary><div style="margin-top:8px">
+<b>停買規則</b>:前一交易日收盤,四個停買燈號中有 ≥3 燈危險度 ≥75 → 下一交易日不新買進;賣出、停損照常。<br>
+<b>危險度</b>:各指標以 PIT 擴張百分位計算(第 t 日只與當日及以前的歷史比較,滿一年才起算),0–100,越高越危險;VIX 與外資流向反向計分(越低越危險)。<br>
+<b>四個停買燈號</b>:① 融資綜合:融資超額水位(去趨勢殘差)、融資成長 vs 名目 GDP 背離、融資半年擴張,三項高度相關,以 PCA 合一(每月只用過去資料重估權重),再算危險度;② 外資 20 日淨流向;③ 台幣 20 日變動;④ VIX 水準。<br>
+<b>參考指標(不影響停買)</b>:脆弱度合成分數、VIX 5 日跳升、指數距年線、費半與韓股乖離。<br>
+<b>驗證</b>:門檻 75 與 ≥3 燈事前固定,未以交易資料調整。以實際交易檢驗,停買日隔日的買進 106 筆勝率 7%,其他買進 1,424 筆勝率 50%(排列檢定 p≈0.001);2017 年起停買日後 20 日櫃買指數跌 ≥7% 的機率 15%,其他日 7%。<br>
+<b>限制</b>:停買日集中在 2026 年兩段壓力期,樣本小;本頁為風險控管工具,非投資建議。
+</div></details></div>
 </div>
 <script>__APPJS__</script>
 <script>document.getElementById('th').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')=='dark'?'light':'dark');if(window.__redraw)window.__redraw();};
@@ -546,15 +552,15 @@ function showAt(i){sel=i;const x=X(i),y=Y(D.comp[i]);
  const rc=redCount(i);tip.style.opacity='1';
  tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>亮紅 '+rc+'/'+NSLOW+(brakeState(i)==='brake'?' ⛔停買可賣':'');
  let tx=x+12;if(tx>W-104)tx=x-104;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';
- $('viewdate').textContent=(pinned?'📌 已固定於 '+D.dates[i]+'(← → 鍵逐日移動,Shift 一次 20 日;移動任一圖換位置,點兩下取消)':'檢視 '+D.dates[i]+' — 下方各燈號同步(點一下可固定)');
+ $('viewdate').textContent=pinned?'📌 已固定(點兩下取消)':'';
  gauge(i);renderCards(i);
  syncStockCursor(D.dates[i]);}   // ← 共用游標:同步個股圖
 function move(ev){if(pinned)return;showAt(idxAt(ev));}
 function leave(){if(pinned){showAt(pinIdx);return;}
  $('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
- sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);hideStockCursor();}
+ sel=b;$('viewdate').textContent='';gauge(b);renderCards(b);hideStockCursor();}
 function unpin(){pinned=false;pinIdx=null;$('tcx').setAttribute('opacity','0');$('tcd').setAttribute('opacity','0');tip.style.opacity='0';
- sel=b;$('viewdate').textContent='最新('+D.dates[b]+')— 點一下線圖可固定數值';gauge(b);renderCards(b);hideStockCursor();}
+ sel=b;$('viewdate').textContent='';gauge(b);renderCards(b);hideStockCursor();}
 function onClick(ev){const i=idxAt(ev);if(pinned&&Math.abs(i-pinIdx)<=1){unpin();}else{pinned=true;pinIdx=i;showAt(i);}}
 // 由個股圖的滑鼠位置換算共用游標(對映到脆弱度日期,驅動兩圖)
 function stockFragIdx(clientX){const r=$('scsvg').getBoundingClientRect();const g=SCG;if(!g)return null;
