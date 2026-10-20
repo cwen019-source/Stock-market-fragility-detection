@@ -1,25 +1,9 @@
 {
- "built": "2026-10-20T11:18:14+00:00",
+ "built": "2026-10-20T21:18:28+00:00",
  "pages": {
   "index.html": {
-   "id": "4641ede62076",
+   "id": "7c796b629874",
    "asof": "2026-10-20"
-  },
-  "us.html": {
-   "id": "4885479d3f5c",
-   "asof": "2026-10-19"
-  },
-  "industry_heat.html": {
-   "id": "90611cb34c1e",
-   "asof": "2026-10-19"
-  },
-  "asset_pricing.html": {
-   "id": "6474df5b52e9",
-   "asof": "2026-07"
-  },
-  "methodology.html": {
-   "id": "4d9b70f13b9b",
-   "asof": "2026-10-19"
   }
  }
 }
