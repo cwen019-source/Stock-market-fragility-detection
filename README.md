@@ -1,18 +1,9 @@
-# 台股 / 美股脆弱度儀表板 — GitHub Actions 每日自動版
+# 台股脆弱度儀表板 — GitHub Actions 每日自動版
 
-四張頁面,**台灣時間每個交易日早上 07:50(開盤前)自動更新**,頁面開著也會提示新資料:
-
-上方共用分頁列,可直接切換:
-
-| 頁面 | 內容 |
-|---|---|
-| `index.html` | 台股脆弱度(融資餘額 / 三大法人 / 台幣 / 加權指數 + 美股韓股 VIX 外部因素) |
-| `us.html` | 美股脆弱度(**S&P 500 · Nasdaq · 費城半導體 SOX** + FINRA 全市場融資餘額) |
-| `industry_heat.html` | 產業熱度雷達(33 個官方產業別的 **pairwise 相關性**,判斷該選股還是買籃子) |
-| `asset_pricing.html` | 資產定價實驗室(台股自建 Fama-French / q-factor 因子,月頻,每月更新) |
-
-兩頁互相有切換連結,方法論相同:10 項指標一律轉成 **PIT 擴張百分位**(第 t 日只用當日及以前的資料,
-無前視偏誤),加權合成 0–100 脆弱度;含共用釘選游標、個股 K 線 + 月/季/半年線。純風控壓力計,非投資建議。
+單一頁面 `index.html`,**台灣時間每個交易日早上 07:50(開盤前)自動更新**,頁面開著也會提示新資料。
+指標:融資(三項合一為「融資綜合」)、外資流向、台幣、加權指數,加上美股 / 韓股 VIX 等外部因素。
+各指標一律轉成 **PIT 擴張百分位**(第 t 日只用當日及以前的資料,無前視偏誤)。
+停買規則:四個停買燈號(融資綜合、外資、台幣、VIX)中 ≥3 燈危險度 ≥75 → 隔日不新買進。純風控工具,非投資建議。
 
 ## 為什麼排在早上 07:50(開盤前)
 
@@ -28,21 +19,19 @@
 2. **開啟 Pages**:repo → Settings → Pages → Source 選 **「GitHub Actions」**(不是 Deploy from a branch)。
 3. **Actions 寫入權限**:Settings → Actions → General → Workflow permissions → **Read and write permissions** → Save。
 4. **FinMind token(強烈建議)**:Settings → Secrets and variables → Actions → New repository secret,
-   Name = `FINMIND_TOKEN`。免 token 的匿名額度很快用完,產業熱度(每日 548 檔)與資產定價會抓不完。
+   Name = `FINMIND_TOKEN`。免 token 的匿名額度較少,建議設定。
 5. 手動跑一次:Actions → `update-and-deploy` → Run workflow → scope 選 `all`(第一次會比較久)。
 
 ## 自動更新怎麼運作
 
 | 時間(台灣) | 範圍 | 內容 |
 |---|---|---|
-| 週一~五 07:50 | daily | 台股脆弱度、美股脆弱度、產業熱度雷達;資產定價快取小量續抓 |
-| 週六 10:17 | weekly | 題材產業報酬 `industry_returns.json` → 重建台股頁 |
-| 每月 1 日 11:23 | monthly | 資產定價實驗室(全市場 2145 檔) |
+| 週一~五 07:50 | daily | 台股脆弱度頁、警報信 |
+| 週六 10:17 | weekly | 重建台股頁 |
 | push 到 main | deploy-only | 只重新部署,不抓資料 |
 
-- 每張表各自重試、互不影響;抓資料有時間預算(`FETCH_BUDGET_MIN`),被速率限制時不會卡死整個 job。
-- 快取覆蓋率不足 90% 時(`ci_check.py`)**沿用上一版頁面**,不會用殘缺資料覆蓋。
-- 建置完 `stamp.py` 會替每頁蓋上 build-id 並產生 `version.json`。
+- 抓資料失敗會自動重試;失敗時沿用上一版頁面。
+- 建置完 `stamp.py` 會替頁面蓋上 build-id 並產生 `version.json`。
 - **頁面開著也會更新**:`autoupdate.js` 每 10 分鐘、切回分頁、恢復網路時檢查 `version.json`;
   有新資料 → 右下角提示「重新整理」;離開分頁超過 30 分鐘再回來 → 直接載入新版。
   若建置超過 4 天沒跑,頁面會顯示「自動更新可能停擺」。
@@ -71,19 +60,19 @@ GitHub cron 一律用 UTC(台灣 07:50 = UTC 前一天 23:50,所以星期也往�
 
 ## 警報信
 
-每次台股/美股頁重建後執行 `alert.py`:台股四個停買燈號 **≥3 燈危險度 ≥75** 就寄信(美股:六燈 ≥4),
+每次台股頁重建後執行 `alert.py`:四個停買燈號 **≥3 燈危險度 ≥75** 就寄信,
 規則與頁面上「亮紅 x/4」相同。信件內含燈號表,附件 `fragility_stats_<日期>.xlsx`
 (摘要 / 各燈號最新值與危險度 / 近 60 日綜合分數、亮紅數、觸發與各燈號危險度)。同一市場同一資料日只寄一次。
 
 設定(Gmail):
 1. 寄件的 Gmail 帳號開啟兩步驟驗證 → 到 <https://myaccount.google.com/apppasswords> 產生「應用程式密碼」。
 2. repo → Settings → Secrets and variables → Actions → **Secrets**:`SMTP_USER` = 寄件 Gmail,`SMTP_PASS` = 應用程式密碼。
-3. (可選)同頁 **Variables**:`ALERT_TO` 改收件人(預設 s12332167890@gmail.com,可逗號分隔多位)、`ALERT_MIN_RED_TW` / `ALERT_MIN_RED_US` 改門檻(預設台股 3、美股 4)。
+3. (可選)同頁 **Variables**:`ALERT_TO` 改收件人(預設 s12332167890@gmail.com,可逗號分隔多位)、`ALERT_MIN_RED_TW` 改門檻(預設 3)。
 4. 測試:Actions → Run workflow → 勾選 `force_alert`(scope 可選 deploy-only)→ 會寄一封信,未達門檻時標示 [測試]。
 
 ## 未來三個月:美國關鍵數據與 FOMC(不確定性行事曆)
 
-台股、美股頁的儀表下方會顯示「以最新資料日起算三個月內」的美國重大事件(台灣時間、倒數天數),
+台股頁的儀表下方會顯示「以最新資料日起算三個月內」的美國重大事件(台灣時間、倒數天數),
 上方長條是**每週不確定性密度**(事件重要度加總,紅點 = FOMC 週)。每次每日更新都會重抓官方行事曆(`macro_calendar.py`):
 
 | 重要度 | 事件 | 來源 |
@@ -99,46 +88,13 @@ GitHub cron 一律用 UTC(台灣 07:50 = UTC 前一天 23:50,所以星期也往�
 
 ## 調整
 - 改觸發時間:編輯 `.github/workflows/update.yml` 的 `cron`(記得換算 UTC,跨午夜要順便挪星期)。
-- 改指標權重/門檻:編輯 `fragility_dashboard.py` / `us_fragility_dashboard.py` 上方的 `WEIGHTS`、`INVERT`、`ORDER`。
+- 改指標權重/門檻:編輯 `fragility_dashboard.py` 上方的 `WEIGHTS`、`INVERT`、`ORDER`。
 
 ## 資料源
 **台股**
 - FinMind:融資餘額 / 加權指數+成交值 / 三大法人(外資)/ USD-TWD
 - FRED:美國 VIX(VIXCLS)/ Nasdaq / KOSPI
 
-**美股**(多來源自動切換,頁面會據實標示當次實際採用的來源)
-- FRED:SP500 / NASDAQCOM / VIXCLS / NFCI / 高收益債利差 / 名目GDP(首選)
-- 備援:Cboe 官方 VIX、芝加哥聯準會 NFCI、SPY/ONEQ/SOXX ETF 還原價代理、世界銀行 GDP
-- FINRA:全市場融資餘額(Margin Statistics,月頻,依發布落後 25 天 PIT 對齊)
-- stockanalysis.com:SOXX(費半 SOX 代理)與個股搜尋(支援 CORS)
-
-> 費城半導體(SOX)指數本身無免費授權資料源,頁面以 **iShares SOXX ETF 還原價代理**,
-> 且 SOXX 於 2021 年由 PHLX SOX 改追蹤 ICE 半導體指數,長期比較請留意。
-
 ## 免責
 本專案為風險分析框架,所有數據僅供研究參考,**非投資建議**。
 
----
-
-## 產業子分析(新增)
-
-儀表板中段的「產業子分析」提供 AI/熱度題材籃子按鈕(AI伺服器代工、PCB載板、被動元件、晶圓代工封測、IC設計、矽智財IP、散熱、光通訊CPO、記憶體、重電電力、網通設備、電源連接、機殼機構 + 全市場)。點選任一產業後,下方 8 個燈號會**依「該指標對該產業未來 20 日報酬的預測力(Spearman rank-IC)」在目前選定的日期區間內重新排序**,並標出每個指標的 IC 值與名次。切換日期區間(1/3/5年或自訂)會即時重算 IC。
-
-- 產業報酬 = 每題材籃子成分股(可於 `build_industry.py` 的 `THEMES` 自行增修)(還原股價)的**等權日報酬指數**(`build_industry.py` 產生 `industry_returns.json`)。
-- `industry_returns.json` 已含在 repo,`fragility_dashboard.py` 會自動嵌入;若檔案不存在則自動隱藏此區塊。
-- **每週自動更新**:`update.yml` 的 weekly 排程每週六重建並提交 `industry_returns.json`(較重,約抓 276 檔;建議設定 `FINMIND_TOKEN` secret)。
-- rank-IC 為描述性統計、樣本有限,**非投資建議**,亦非嚴謹的因子回測(未做 point-in-time / 多重檢定校正)。
-
----
-
-## 產業熱度雷達(`industry_heat.html`)
-
-以產業內**平均兩兩相關 ρ** 偵測資金主題化。**回測否定了原始假設**:ρ 對未來產業報酬的橫斷面
-rank-IC ≈ 0(未來20日 −0.009 t=−1.25;未來60日 −0.001 t=−0.13),Δρ 甚至微弱負向。
-但 ρ 能預測未來個股離散度(高相關組 1.46 vs 低相關組 1.66),因此正確用法是**兩段式**:
-
-- **要不要參與** → 看動能(近60日籃子報酬,IC +0.051 **t=6.95**)與離散度(IC −0.051 **t=−5.75**)
-- **選股還是買籃子** → 看 ρ(高 ρ = 個股同步、選股空間小)
-
-成分股:每官方產業別先取股號較小者最多 18 檔,再依中位成交值留前 10 檔;非市值加權正式指數。
-IC 效果量小(0.03–0.05),當排序參考而非訊號。**非投資建議。**

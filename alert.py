@@ -4,7 +4,6 @@
 
 寄信規則
   ‧ 台股:四個停買燈號(融資綜合、外資流向、台幣、VIX)中 ≥3 燈危險度 ≥75 → 當日寄一封(同一資料日不重複寄)
-  ‧ 美股:六燈中 ≥4 燈 ≥75
   狀態記在 alert_state.json。
 
 環境變數
@@ -12,7 +11,7 @@
   ALERT_TO                收件人(逗號分隔),預設 SMTP_USER
   SMTP_HOST / SMTP_PORT   預設 smtp.gmail.com / 465
   SITE_URL                儀表板網址
-  ALERT_MIN_RED_TW / ALERT_MIN_RED_US   覆寫門檻(預設:台股取頁面的 stopn=3,美股 4)
+  ALERT_MIN_RED_TW        覆寫門檻(預設取頁面的 stopn=3)
   ALERT_LEVEL             紅燈門檻(預設 75)
   DRY_RUN=1               不寄,存成 alert_preview.eml
   FORCE=1                 強制寄一封(未達條件時標示 [測試])
@@ -31,7 +30,7 @@ import pandas as pd
 
 STATE = "alert_state.json"
 LEVEL_V1 = float(os.environ.get("ALERT_LEVEL", "75"))
-PAGE = {"TW": "index.html", "US": "us.html"}
+PAGE = {"TW": "index.html"}
 
 
 

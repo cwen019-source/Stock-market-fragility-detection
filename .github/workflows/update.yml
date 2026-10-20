@@ -14,7 +14,6 @@ on:
   schedule:
     - cron: "50 23 * * 0-4"   # daily
     - cron: "17 2 * * 6"      # weekly
-    - cron: "23 3 1 * *"      # monthly
   push:
     branches: ["main"]
   workflow_dispatch:
@@ -82,32 +81,6 @@ jobs:
         if: steps.scope.outputs.fetch == 'true'
         run: pip install -r requirements.txt
 
-      # 股價快取不進版控,改放 Actions cache(每次都存新的一份,下次接著用 → 只抓增量)
-      - name: Restore heat cache
-        if: steps.scope.outputs.daily == 'true'
-        uses: actions/cache@v4
-        with:
-          path: heat_px_cache.json
-          key: heat-px-${{ github.run_id }}
-          restore-keys: heat-px-
-      - name: Restore industry cache
-        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true'
-        uses: actions/cache@v4
-        with:
-          path: industry_px_cache.json
-          key: industry-px-${{ github.run_id }}
-          restore-keys: industry-px-
-      # 每日也還原/存回(Actions cache 7 天沒用會被清掉),並用少量預算慢慢補齊
-      - name: Restore asset-pricing caches
-        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.monthly == 'true'
-        uses: actions/cache@v4
-        with:
-          path: |
-            ap_px_cache.json
-            ap_fund_cache.json
-          key: ap-${{ github.run_id }}
-          restore-keys: ap-
-
       - name: Retry helper
         if: steps.scope.outputs.fetch == 'true'
         run: |
@@ -118,51 +91,13 @@ jobs:
           exit 1
           EOF
 
-      # ---------- weekly ----------
-      - name: Industry returns (weekly)
-        if: steps.scope.outputs.weekly == 'true'
-        continue-on-error: true
-        env: { FETCH_BUDGET_MIN: "25" }
-        run: bash /tmp/retry.sh 2 python build_industry.py
-
-      # ---------- daily (weekly 也重建台股頁以嵌入新產業報酬) ----------
+      # ---------- daily ----------
       - name: Taiwan dashboard
         if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true'
         continue-on-error: true
         run: bash /tmp/retry.sh 3 python fragility_dashboard.py
-      - name: US dashboard
-        if: steps.scope.outputs.daily == 'true'
-        continue-on-error: true
-        run: bash /tmp/retry.sh 3 python us_fragility_dashboard.py
-      - name: Industry heat — fetch prices
-        if: steps.scope.outputs.daily == 'true'
-        continue-on-error: true
-        env: { FETCH_BUDGET_MIN: "45" }
-        run: python heat_fetch.py
-      - name: Industry heat — build page
-        if: steps.scope.outputs.daily == 'true'
-        continue-on-error: true
-        run: python ci_check.py heat && python industry_heat.py
 
-      # ---------- monthly(抓取在每日也小量進行;頁面每月重建)----------
-      - name: Asset pricing — prices
-        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.monthly == 'true'
-        continue-on-error: true
-        env:
-          FETCH_BUDGET_MIN: ${{ steps.scope.outputs.monthly == 'true' && '120' || '15' }}
-        run: python ap_px_fetch.py
-      - name: Asset pricing — fundamentals
-        if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.monthly == 'true'
-        continue-on-error: true
-        env:
-          FETCH_BUDGET_MIN: ${{ steps.scope.outputs.monthly == 'true' && '120' || '15' }}
-        run: python ap_fetch.py
-      - name: Asset pricing — build page
-        if: steps.scope.outputs.monthly == 'true'
-        continue-on-error: true
-        run: python ci_check.py ap && python ap_lab.py
-
-      # ---------- 未來三個月美國關鍵數據 / FOMC(嵌入台股、美股頁)----------
+      # ---------- 未來三個月美國關鍵數據 / FOMC(嵌入台股頁)----------
       - name: Macro calendar (FOMC / CPI / jobs …)
         if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true'
         continue-on-error: true
@@ -193,7 +128,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           touch alert_state.json
-          git add -A -- '*.html' '*.csv' industry_returns.json heat_members.json version.json alert_state.json macro_calendar.json
+          git add -A -- '*.html' '*.csv' version.json alert_state.json macro_calendar.json
           if git diff --cached --quiet; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           git commit -m "data: auto update $(date +%F) [skip ci]"
           for i in 1 2 3; do git pull --rebase -X theirs origin "${GITHUB_REF_NAME}" && git push && break; sleep 10; done

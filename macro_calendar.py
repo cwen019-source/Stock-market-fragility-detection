@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""未來三個月美國關鍵經濟數據 / FOMC 行事曆 → macro_calendar.json,並嵌入 index.html / us.html。
+"""未來三個月美國關鍵經濟數據 / FOMC 行事曆 → macro_calendar.json,並嵌入 index.html。
 
 資料源(全部官方、每次執行重抓;某來源失敗時沿用上次 macro_calendar.json 裡該來源的日期):
   FOMC        federalreserve.gov 會議行事曆(* = 附經濟預測 SEP / 點陣圖)
@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 OUT = "macro_calendar.json"
-PAGES = ["index.html", "us.html"]
+PAGES = ["index.html"]
 MONTHS = int(os.environ.get("MACRO_MONTHS", "3"))
 ET, TW = ZoneInfo("America/New_York"), ZoneInfo("Asia/Taipei")
 MON = {m: i for i, m in enumerate(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1)}
