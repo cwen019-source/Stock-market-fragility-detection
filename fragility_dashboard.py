@@ -4,7 +4,7 @@
 台股脆弱度儀表板 (每日更新, 互動版)
 ================================
 彙整槓桿、估值、情緒、資金流、波動度等訊號, 正規化後合成「脆弱度分數」,
-附壓力測試(敏感度)、脆弱度歷史互動線圖(游標同步各燈號當日數值、可設日期區間、NBER 衰退灰帶)。
+脆弱度歷史互動線圖(游標同步各燈號當日數值、可設日期區間、NBER 衰退灰帶)。
 純風控壓力計, 不是擇時工具, 非投資建議。
 
 資料源(皆免費, 無需金鑰):
@@ -32,6 +32,12 @@ INVERT={"vix_level","foreign_flow"}     # 越低越危險
 #            美股−0.076、距年線−0.051):漲多不代表要跌,動能會延續。
 #            故移出計分, 僅作情境參考, 避免誤殺仍在噴出的飆股。
 SLOW={"margin_resid_z","margin_yoy_div","margin_roc","vix_level","foreign_flow","fx_pressure"}
+# ── 停買燈號(2026-10 改版):三個融資指標彼此高度相關(Spearman 0.69–0.80),原「6 燈 ≥5」等於融資算三票。
+#    改為四燈:融資綜合(三項以 PCA 合一,每月只用過去資料重估權重,再排 PIT 百分位)＋外資流向＋台幣＋VIX,
+#    4 燈中 ≥3 顆 ≥75 → 停買。門檻凍結,前瞻檢驗至少 3–6 個月再檢討。
+MARGIN3=["margin_resid_z","margin_yoy_div","margin_roc"]
+STOP4=["margin_combo","foreign_flow","fx_pressure","vix_level"]
+STOP_N=3
 TRIGGER={"vix_spike"}                   # 另有「跌破年線」由 trend_health 值判定
 MOMO={"trend_health","us_nasdaq","kr_bubble"}
 GROUP={**{k:"內部槓桿" for k in ("margin_resid_z","margin_yoy_div","margin_roc")},
@@ -47,7 +53,7 @@ WEIGHTS={"margin_resid_z":1.4,"margin_yoy_div":1.3,"margin_roc":1.0,"vix_level":
 FMT={"margin_resid_z":[1,1,"σ"],"margin_yoy_div":[1,1,"pp"],"margin_roc":[0,1,"%"],
      "vix_level":[0,1,""],"vix_spike":[1,1,""],"foreign_flow":[1,0,"億"],
      "fx_pressure":[1,1,"%"],"trend_health":[1,1,"%"],"us_nasdaq":[1,1,"%"],"kr_bubble":[1,1,"%"]}
-ORDER=["margin_resid_z","margin_yoy_div","margin_roc","trend_health",
+ORDER=["margin_combo","margin_resid_z","margin_yoy_div","margin_roc","trend_health",
        "foreign_flow","fx_pressure","vix_level","vix_spike","us_nasdaq","kr_bubble"]
 # NBER 美國景氣衰退期(資料起於~2013, 實務上僅 2020 COVID 落在範圍內)
 NBER=[["1990-07-01","1991-03-31"],["2001-03-01","2001-11-30"],
@@ -234,6 +240,23 @@ def build_app_data(d, R):
             dng=[None if x is None else int(round(x)) for x in dvals])
         if k in SLOW:                       # ★ 只有慢層計入結構脆弱度
             w=WEIGHTS.get(k,1.0); dmat[k]=dng*w; wsum+=w
+    # ── 融資綜合:三項融資危險度 → 每月 PIT PCA(只用該月以前資料估權重)→ PIT 百分位 ──
+    if all(k in aligned for k in MARGIN3):
+        mdf=pd.DataFrame({k:pd.Series([np.nan if v is None else float(v) for v in aligned[k]["dng"]],index=master) for k in MARGIN3}).dropna()
+        score=pd.Series(np.nan,index=master); wlast=None
+        for m in mdf.index.to_period("M").unique():
+            tr=mdf[mdf.index<m.start_time]; te=mdf[mdf.index.to_period("M")==m]
+            if len(tr)<250 or not len(te): continue
+            mu,sd=tr.mean(),tr.std().replace(0,1)
+            vals,vecs=np.linalg.eigh(np.cov(((tr-mu)/sd).T.values)); w=vecs[:,-1]
+            if w.sum()<0: w=-w
+            score[te.index]=((te-mu)/sd).values@w; wlast=w
+        cv=pit_pct(score.values)
+        wtxt="、".join(f"{aligned[k]['label']} {x:.2f}" for k,x in zip(MARGIN3,wlast)) if wlast is not None else "暖身中"
+        aligned["margin_combo"]=dict(label="融資綜合(三項合一)",unit="",fmt=[1,2,""],group="內部槓桿",
+            note=f"三項融資指標以 PCA 合成,每月只用過去資料重估權重(目前:{wtxt}),再排歷史百分位。計入停買燈號",
+            val=[None if pd.isna(x) else round(float(x),2) for x in score.values],
+            dng=[None if x is None else int(round(x)) for x in cv])
     cols=list(dmat.columns); wvec=np.array([WEIGHTS.get(k,1.0) for k in cols])
     present=dmat.notna()
     wsum_row=(present.values*wvec).sum(axis=1)
@@ -265,21 +288,13 @@ def build_app_data(d, R):
                 inds=inds, order=[k for k in ORDER if k in inds],
                 trig=trig, trigvix=trig_vix, trigma=trig_ma, trigpct=TRIG_PCT,
                 ma60br=ma60br, r20=r20,
-                slow=[k for k in ORDER if k in inds and k in SLOW],
+                slow=[k for k in STOP4 if k in inds] if all(k in inds for k in STOP4) else [k for k in ORDER if k in inds and k in SLOW],
+                stopn=STOP_N if all(k in inds for k in STOP4) else 5,
                 momo=[k for k in ORDER if k in inds and k in MOMO])
 
-def stress_test(d):
-    margin=d.get("margin"); cur=float(margin.iloc[-1]) if margin is not None and len(margin) else float("nan")
-    rows=[]
-    for x in [5,10,15,20,25]:
-        mu=160*(1-x/100); frac=0.5*(1+math.erf((130-mu)/25/math.sqrt(2)))
-        rows.append(dict(drop=x,avg_ratio=round(mu),pct_call=round(frac*100,1),at_risk=round(cur*frac)))
-    return cur, rows
-
-def build_html(app, comp_now, asof, stress_cur, stress_rows):
-    strows="".join(f"<tr><td>指數 −{x['drop']}%</td><td>{x['avg_ratio']}%</td><td class='r'>{x['pct_call']}%</td><td class='r'>{x['at_risk']:,} 億</td></tr>" for x in stress_rows)
+def build_html(app, comp_now, asof):
     js=APP_JS.replace("__APPDATA__",json.dumps(app,ensure_ascii=False,separators=(",",":"))).replace("__REC__",json.dumps(NBER))
-    return TEMPLATE.replace("__ASOF__",asof).replace("__STRESS__",strows).replace("__MARGIN__",f"{stress_cur:,.0f}").replace("__APPJS__",js)
+    return TEMPLATE.replace("__ASOF__",asof).replace("__APPJS__",js)
 
 TEMPLATE=r"""<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>台股脆弱度儀表板</title>
@@ -324,6 +339,9 @@ h1{font-size:21px;margin:0 0 3px}.sub{color:var(--ts);font-size:12.5px}
 .gtitle{font-size:12.5px;font-weight:650;margin:14px 0 8px}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 @media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
+.msub{margin-top:10px;border-top:1px dashed var(--border);padding-top:8px}.msub summary{cursor:pointer;font-size:12px;font-weight:650;color:var(--series-1)}
+.msubg{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:8px}.msubg .card{padding:10px 11px;border-radius:10px}
+.card:has(> .msub[open]){grid-column:1/-1}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 14px;border-left:3px solid var(--border);transition:border-color .1s;min-width:0;overflow-wrap:anywhere}
 .card.red{border-left-color:var(--red)}.card.warn{border-left-color:var(--warn)}.card.ok{border-left-color:var(--ok)}
 .ct{font-size:12px;color:var(--ts)}.cv{font-size:23px;font-weight:680;margin:3px 0;font-variant-numeric:tabular-nums}
@@ -344,7 +362,7 @@ details.note summary::-webkit-details-marker{color:var(--muted)}
 #th{position:fixed;top:12px;right:12px;background:var(--surface);color:var(--tp);border:1px solid var(--border);border-radius:8px;padding:6px 11px;cursor:pointer}
 </style></head><body><button id="th">◐</button><div class="wrap">
 <h1>台股脆弱度儀表板 <span style="font-size:11px;color:var(--ok);border:1px solid var(--border);border-radius:6px;padding:1px 6px">PIT 無前視偏誤</span></h1><div class="sub">資料 FinMind + FRED · 更新於 __ASOF__ · 危險度=PIT擴張百分位(只用當日及以前) · 壓力計非擇時工具 · 非投資建議</div>
-<nav class="tabs"><a href="index.html" class="on">台股脆弱度</a><a href="us.html">美股脆弱度</a><a href="industry_heat.html">產業熱度雷達</a><a href="asset_pricing.html">資產定價實驗室</a><a href="methodology.html">方法論</a></nav>
+<nav class="tabs"><a href="index.html" class="on">台股脆弱度</a><a href="us.html">美股脆弱度</a><a href="industry_heat.html">產業熱度雷達</a><a href="asset_pricing.html">資產定價實驗室</a></nav>
 <div class="hero"><div class="gauge" id="gauge"><div class="inner"><div><div class="num" id="cnum">–</div><div class="lb">脆弱度 / 100</div></div></div></div>
  <div class="txt"><div class="big" id="cjudge">–</div>
  <div class="d">慢層<b>結構脆弱度</b>定槓桿上限,快層<b>觸發</b>(VIX跳升/跌破均線)才真的降到 1x。脆弱但未觸發=不加碼、不出場。</div>
@@ -373,17 +391,15 @@ details.note summary::-webkit-details-marker{color:var(--muted)}
 <h2 id="indh" style="margin-bottom:6px">產業子分析 <span style="font-size:11px;font-weight:400;color:var(--muted)">依對該產業報酬的預測力(rank-IC)重排</span></h2>
 <div id="indbar" class="indbar"></div>
 <div class="indcap" id="indcap"></div>
-<div class="gtitle" style="color:var(--series-1)">■ 慢層 · 內部槓桿 <span style="font-weight:400;color:var(--muted)">計分</span></div>
+<div class="gtitle" style="color:var(--series-1)">■ 慢層 · 內部槓桿 <span style="font-weight:400;color:var(--muted)">停買燈號只計「融資綜合」;三個分項收在卡片內,需要細看再點開</span></div>
 <div class="grid" id="grp-internal"></div>
-<div class="gtitle" style="color:var(--series-1)">■ 慢層 · 外部資金與情緒 <span style="font-weight:400;color:var(--muted)">計分</span></div>
+<div class="gtitle" style="color:var(--series-1)">■ 慢層 · 外部資金與情緒 <span style="font-weight:400;color:var(--muted)">三項皆計入停買燈號(四燈中 ≥3 顆 ≥75 → 停買)</span></div>
 <div class="grid" id="grp-external"></div>
 <div class="gtitle" style="color:var(--red)">■ 快層 · 觸發 <span style="font-weight:400;color:var(--muted)">亮起才踩剎車</span></div>
 <div class="grid" id="grp-trigger"></div>
 <div class="gtitle" style="color:var(--muted)">■ 動能參考 <span style="font-weight:400;color:var(--muted)">不計分(乖離越大→後續回撤反而越淺)</span></div>
 <div class="grid" id="grp-momo"></div>
-<h2>壓力測試 / 敏感度分析(融資追繳連鎖,示意性)</h2>
-<table><thead><tr><th>情境</th><th>估計平均維持率</th><th>逼近斷頭比例</th><th>潛在追繳部位</th></tr></thead><tbody>__STRESS__</tbody></table>
-<details class="note"><summary style="cursor:pointer;font-weight:650;color:var(--tp)">方法、資料源與已知限制(點開)</summary><div style="margin-top:8px">各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>(<b>擴張視窗迴歸</b>:每日迴歸係數與標準化只用當日及以前資料,已消除「全樣本一次迴歸」造成的前視洩漏)與<b>成長率背離(vs 名目GDP)</b>雙軌:成長背離改以 <b>IMF WEO 台灣名目GDP 年增率</b>(DBnomics,年頻,僅取已實現年份、PIT 落後)為分母——把「經濟自然成長」放進分母,<b>去除用被炒高的指數當分母的泡沫污染</b>(GDP 源不可得時自動退回指數)。真 GDP 為<b>季頻、落後 1–2 月、會修正</b>,故僅用年頻已實現值當慢速結構性錨,非即時訊號。壓力測試假設整體融資維持率約常態(均值160%、斷頭130%),僅為示意非精算。目前融資餘額約 __MARGIN__ 億。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<br><b>2026-07 改版(依回測修正):</b>原設計把「乖離類」指標(指數距年線、美股乖離、韓股乖離)當危險訊號,但以 2013–2026 台股樣本回測,其危險度與<b>未來60日最大回撤的 Spearman IC 為負</b>(韓股 −0.139、美股 −0.076、距年線 −0.051)——<b>漲多預測的是後續回撤較淺,不是較深</b>,計分會系統性誤殺仍在噴出的個股。且原「脆弱度≥55 即降槓桿」的撥盤,在 2018/10 與 2022 兩次真空頭中降槓桿天數僅 0% 與 5%,績效反而被「完全不用融資」支配。故改為雙層:慢層只設上限、快層才觸發。<b>但需注意:指標的預測方向跨期並不穩定</b>(例:融資超額水位 IC 在 2013–19 為 −0.119、2020–26 為 +0.112),且樣本以多頭為主,任何減碼規則天生吃虧——本改版降低誤殺,<b>不保證提升績效</b>。<br><br><b>前視偏誤有兩個層次,必須分開講:</b><br>① <b>計算層 — 已驗證乾淨。</b>各指標的危險度為 PIT 擴張百分位。以 2026-06-25 為例做截斷測試(只餵當天以前的原始資料完全重跑),當天的合成脆弱度 86.90、十項危險度與兩個觸發旗標<b>與全樣本算出來完全一致(差異 0.000000)</b>,截斷前最後 300 天亦為零差異。<br>② <b>規則層 — 存在後見之明,已量化。</b>觸發門檻、槓桿上限(1.2/1.35/1.5)、慢層採用哪六項指標、以及把乖離三項移出計分,這些都是<b>看完整段 2013–2026 樣本後才決定的</b>——換言之在 2026-06-25 當下,這一版規則並不存在。為了量化這件事,做了 walk-forward 檢驗(每年只用當年底以前的資料挑門檻、隔年才套用):無後見之明版 CAGR <b>+25.5%</b>/最大回撤 −31.2%,對照本頁採用的門檻 <b>+25.6%</b>/−31.7%,<b>後見之明僅灌水約 0.1 個百分點</b>(四個門檻表現本就接近,績效不是靠挑門檻挑出來的)。<br><b>但這個檢驗只涵蓋「門檻」這一個參數。</b>更上層的結構性決策(雙層架構本身、慢層指標的取捨、以 VIX 跳升當觸發)屬於設計選擇,無法用同樣方式前推檢驗,<b>那部分的後見之明仍然存在且無法量化</b>;加上樣本期幾乎全為多頭、僅涵蓋一個市場循環,請據此折價看待所有回測數字。<b>本頁為風險框架,非投資建議。</b></div></details></div>
+<details class="note"><summary style="cursor:pointer;font-weight:650;color:var(--tp)">方法、資料源與已知限制(點開)</summary><div style="margin-top:8px">各指標一律轉成 <b>PIT 擴張百分位</b>(第 t 日危險度只用「當日及以前」的分佈計算,<b>無前視偏誤</b>;需滿一年暖身才起算)再合成——非全樣本百分位。融資背離採<b>去趨勢殘差</b>(<b>擴張視窗迴歸</b>:每日迴歸係數與標準化只用當日及以前資料,已消除「全樣本一次迴歸」造成的前視洩漏)與<b>成長率背離(vs 名目GDP)</b>雙軌:成長背離改以 <b>IMF WEO 台灣名目GDP 年增率</b>(DBnomics,年頻,僅取已實現年份、PIT 落後)為分母——把「經濟自然成長」放進分母,<b>去除用被炒高的指數當分母的泡沫污染</b>(GDP 源不可得時自動退回指數)。真 GDP 為<b>季頻、落後 1–2 月、會修正</b>,故僅用年頻已實現值當慢速結構性錨,非即時訊號。NBER 為美國景氣衰退期,因融資資料起於約2013年,範圍內僅涵蓋2020 COVID。<br><b>2026-10 停買燈號改版:</b>原「慢層 6 燈中 ≥5 顆 ≥75」裡三個融資指標高度相關(Spearman 0.69–0.80),等於融資算三票;六燈的第一主成分權重幾乎全落在融資。改為<b>四燈:融資綜合(三項以 PCA 合一,每月只用過去資料重估權重,再排 PIT 百分位)、外資流向、台幣、VIX,4 燈中 ≥3 顆 ≥75 → 停買</b>。以本帳戶 2025–26 年交易做樣本外檢驗:停買日隔日買進 106 筆勝率 7%(其餘 50%),循環平移排列檢定 p=0.001;2017 年起櫃買指數 20 日跌 ≥7% 的機率,停買日 15%、其他日 7%。門檻凍結,前瞻檢驗 3–6 個月後再檢討。<br><b>2026-07 改版(依回測修正):</b>原設計把「乖離類」指標(指數距年線、美股乖離、韓股乖離)當危險訊號,但以 2013–2026 台股樣本回測,其危險度與<b>未來60日最大回撤的 Spearman IC 為負</b>(韓股 −0.139、美股 −0.076、距年線 −0.051)——<b>漲多預測的是後續回撤較淺,不是較深</b>,計分會系統性誤殺仍在噴出的個股。且原「脆弱度≥55 即降槓桿」的撥盤,在 2018/10 與 2022 兩次真空頭中降槓桿天數僅 0% 與 5%,績效反而被「完全不用融資」支配。故改為雙層:慢層只設上限、快層才觸發。<b>但需注意:指標的預測方向跨期並不穩定</b>(例:融資超額水位 IC 在 2013–19 為 −0.119、2020–26 為 +0.112),且樣本以多頭為主,任何減碼規則天生吃虧——本改版降低誤殺,<b>不保證提升績效</b>。<br><br><b>前視偏誤有兩個層次,必須分開講:</b><br>① <b>計算層 — 已驗證乾淨。</b>各指標的危險度為 PIT 擴張百分位。以 2026-06-25 為例做截斷測試(只餵當天以前的原始資料完全重跑),當天的合成脆弱度 86.90、十項危險度與兩個觸發旗標<b>與全樣本算出來完全一致(差異 0.000000)</b>,截斷前最後 300 天亦為零差異。<br>② <b>規則層 — 存在後見之明,已量化。</b>觸發門檻、槓桿上限(1.2/1.35/1.5)、慢層採用哪六項指標、以及把乖離三項移出計分,這些都是<b>看完整段 2013–2026 樣本後才決定的</b>——換言之在 2026-06-25 當下,這一版規則並不存在。為了量化這件事,做了 walk-forward 檢驗(每年只用當年底以前的資料挑門檻、隔年才套用):無後見之明版 CAGR <b>+25.5%</b>/最大回撤 −31.2%,對照本頁採用的門檻 <b>+25.6%</b>/−31.7%,<b>後見之明僅灌水約 0.1 個百分點</b>(四個門檻表現本就接近,績效不是靠挑門檻挑出來的)。<br><b>但這個檢驗只涵蓋「門檻」這一個參數。</b>更上層的結構性決策(雙層架構本身、慢層指標的取捨、以 VIX 跳升當觸發)屬於設計選擇,無法用同樣方式前推檢驗,<b>那部分的後見之明仍然存在且無法量化</b>;加上樣本期幾乎全為多頭、僅涵蓋一個市場循環,請據此折價看待所有回測數字。<b>本頁為風險框架,非投資建議。</b></div></details></div>
 </div>
 <script>__APPJS__</script>
 <script>document.getElementById('th').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')=='dark'?'light':'dark');if(window.__redraw)window.__redraw();};
@@ -443,15 +459,19 @@ function gauge(i){const c=D.comp[i];$('gauge').style.setProperty('--v',c.toFixed
  $('rednow').innerHTML=(D.dates[i]===D.dates[b]?'':D.dates[i]+' · ')
   +'曝險 <b>'+levNow(i).toFixed(2)+'x</b> · 觸發 '
   +(tg?'<b style="color:var(--red)">是</b>':'<b style="color:var(--ok)">否</b>')
-  +' · 亮紅 '+rc+'/'+NSLOW;}
+  +' · 亮紅 '+rc+'/'+NSLOW+' · '+(rc>=(D.stopn||5)?'<b style="color:var(--red)">停買</b>':'<b style="color:var(--ok)">可買</b>');}
 // ---- cards ----
-function cardHTML(k){const c=D.inds[k];
- return '<div class="card" id="cd-'+k+'"><div class="ct">'+c.label+'</div><div class="cv" id="cv-'+k+'">–</div>'
+function cardHTML(k,extra){const c=D.inds[k];
+ const tag=(D.slow||[]).includes(k)?' <span style="font-size:10.5px;color:var(--series-1);font-weight:600">● 計入停買</span>':'';
+ return '<div class="card" id="cd-'+k+'"><div class="ct">'+c.label+tag+'</div><div class="cv" id="cv-'+k+'">–</div>'
  +'<div class="cbarwrap"><div class="cbar" id="cb-'+k+'"></div></div><div class="cp" id="cp-'+k+'"></div>'
  +'<div class="cs" id="cs-'+k+'"></div><div class="cn">'+c.note+'</div>'
- +'<div class="cic" id="cic-'+k+'"></div></div>';}
+ +'<div class="cic" id="cic-'+k+'"></div>'+(extra||'')+'</div>';}
+const MSUB=['margin_resid_z','margin_yoy_div','margin_roc'];
 function buildCards(){
- const g=(n,el)=>{const ks=D.order.filter(k=>D.inds[k].group===n);$(el).innerHTML=ks.map(cardHTML).join('');
+ const subs=MSUB.filter(k=>D.inds[k]),nest=!!D.inds['margin_combo']&&subs.length>0;
+ const subHTML=nest?'<details class="msub"><summary>三個融資分項(點開細看)</summary><div class="msubg">'+subs.map(k=>cardHTML(k)).join('')+'</div></details>':'';
+ const g=(n,el)=>{const ks=D.order.filter(k=>D.inds[k].group===n&&!(nest&&subs.includes(k)));$(el).innerHTML=ks.map(k=>cardHTML(k,k==='margin_combo'?subHTML:'')).join('');
    if(!ks.length)$(el).style.display='none';};
  g('內部槓桿','grp-internal'); g('外部資金情緒','grp-external');
  g('觸發層','grp-trigger');    g('動能參考','grp-momo');}
@@ -907,9 +927,8 @@ def main():
     except Exception:
         app["taiex"]={"dates":[],"close":[]}
     comp_now=app["comp"][-1]
-    stress_cur,stress_rows=stress_test(d)
     asof=app["dates"][-1]
-    open(OUT_HTML,"w").write(build_html(app,comp_now,asof,stress_cur,stress_rows))
+    open(OUT_HTML,"w").write(build_html(app,comp_now,asof))
     row={"date":asof,"composite":round(comp_now,1)}
     for k in R: row[k]=round(R[k]["val"],3)
     hist=pd.DataFrame([row])

@@ -4,5 +4,16 @@
  "美股脆弱度": "US Stock Fragility",
  "台股脆弱度": "Taiwan Stock Fragility",
  "(← → 鍵逐日移動,Shift 一次 20 日;移動任一圖換位置,點兩下取消)": " (← → move by day, Shift = 20 days; move any chart to reposition, double-click to release)",
- "已固定於": "Pinned at"
+ "已固定於": "Pinned at",
+ "融資綜合(三項合一)": "Combined margin (3-in-1)",
+ "● 計入停買": "● counts toward stop-buy",
+ "已併入融資綜合": "merged into combined margin",
+ "停買": "Stop buying",
+ "可買": "OK to buy",
+ "三項皆計入停買燈號(四燈中 ≥3 顆 ≥75 → 停買)": "All three count toward the stop-buy signal (3 of 4 lights ≥75 → stop buying)",
+ "↓ 以下為燈號儀表板(台股停買燈號已改為四燈:融資綜合、外資、台幣、VIX,4 燈 ≥3 → 停買)": "↓ Below: the light dashboard (Taiwan stop-buy signal now uses four lights: combined margin, foreign flow, TWD, VIX; 3 of 4 → stop buying)",
+ "同期燈號規則:": "Light rule in the same period: ",
+ "燈號規則(同期)": "Light rule (same period)",
+ "停買燈號只計「融資綜合」;三個分項收在卡片內,需要細看再點開": "The stop-buy signal counts only “combined margin”; its three components are folded inside that card — open to see them",
+ "三個融資分項(點開細看)": "Three margin components (click to expand)"
 }

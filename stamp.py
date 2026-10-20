@@ -11,7 +11,7 @@ import json
 import os
 import re
 
-PAGES = ["index.html", "us.html", "industry_heat.html", "asset_pricing.html", "methodology.html"]
+PAGES = ["index.html", "us.html", "industry_heat.html", "asset_pricing.html"]
 MARK = re.compile(r'<meta name="build-id"[^>]*>\s*(?:<script src="i18n\.js[^"]*"></script>\s*)?<script src="autoupdate\.js[^"]*" defer></script>\s*')
 ASOF = re.compile(r"更新於\s*(\d{4}-\d{2}-\d{2})")
 DAY = re.compile(r'"(\d{4}-\d{2}-\d{2})"')
