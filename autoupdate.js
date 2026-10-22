@@ -63,12 +63,54 @@
 
   function days(iso) { var t = Date.parse(iso); return isNaN(t) ? 0 : (Date.now() - t) / 864e5; }
 
+
+  // 「自動更新狀態」列:最後建置時間 + 下次排程(台灣時間;排程 = 週一~五 05:57,GitHub 可能延遲)
+  function twParts(d) {
+    var t = new Date(d.getTime() + 8 * 3600e3);
+    return { y: t.getUTCFullYear(), mo: t.getUTCMonth(), d: t.getUTCDate(), wd: t.getUTCDay(), h: t.getUTCHours(), mi: t.getUTCMinutes() };
+  }
+  function fmtTW(d) {
+    var p = twParts(d), z = function (n) { return (n < 10 ? '0' : '') + n; };
+    return (p.mo + 1) + '/' + p.d + ' ' + z(p.h) + ':' + z(p.mi);
+  }
+  function nextRun(now) {
+    for (var k = 0; k < 8; k++) {
+      var p = twParts(new Date(now.getTime() + k * 864e5));
+      var cand = new Date(Date.UTC(p.y, p.mo, p.d, 5, 57) - 8 * 3600e3);       // 05:57 台灣
+      if (p.wd >= 1 && p.wd <= 5 && cand > now) return cand;
+    }
+    return null;
+  }
+  function statusLine(v) {
+    if (!v || !v.built) return;
+    var en = /^en/.test(document.documentElement.lang || '');
+    var built = new Date(v.built), nx = nextRun(new Date());
+    var cur = v.pages && v.pages[page];
+    var txt = en
+      ? '⟳ Auto-update: last run ' + fmtTW(built) + ' (Taiwan time)' + (cur && cur.asof ? ' · market data through ' + cur.asof : '') +
+        (nx ? ' · next run ~' + fmtTW(nx) + ' (GitHub may delay up to ~2h)' : '')
+      : '⟳ 自動更新:最後執行 ' + fmtTW(built) + '(台灣時間)' + (cur && cur.asof ? ' · 市場資料至 ' + cur.asof : '') +
+        (nx ? ' · 下次約 ' + fmtTW(nx) + '(GitHub 排程可能延遲約 2 小時)' : '');
+    var el = document.getElementById('au-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'au-status';
+      el.setAttribute('data-noi18n', '');
+      el.style.cssText = 'font-size:12px;color:var(--muted,#8a8981);margin:4px 0 0';
+      var anchor = document.querySelector('.sub') || document.querySelector('h1');
+      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor.nextSibling);
+      else { el.style.cssText += ';position:fixed;left:12px;bottom:8px;z-index:40'; document.body.appendChild(el); }
+    }
+    el.textContent = txt;
+  }
+
   function check(cameBackAfter) {
     if (!myId || !navigator.onLine) return;
     fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (v) {
         if (!v || !v.pages) return;
+        statusLine(v);
         var cur = v.pages[page];
         if (cur && cur.id && cur.id !== myId) {
           pending = cur;
@@ -95,5 +137,5 @@
     schedule();
   });
   window.addEventListener('online', function () { check(0); });
-  window.addEventListener('load', function () { setTimeout(function () { check(0); }, 3000); schedule(); });
+  window.addEventListener('load', function () { check(0); schedule(); });
 })();

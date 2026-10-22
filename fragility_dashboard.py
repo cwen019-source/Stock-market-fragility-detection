@@ -33,15 +33,17 @@ INVERT={"vix_level","foreign_flow"}     # 越低越危險
 #            故移出計分, 僅作情境參考, 避免誤殺仍在噴出的飆股。
 SLOW={"margin_resid_z","margin_yoy_div","margin_roc","vix_level","foreign_flow","fx_pressure"}
 # ── 停買燈號(2026-10 改版):三個融資指標彼此高度相關(Spearman 0.69–0.80),原「6 燈 ≥5」等於融資算三票。
-#    改為四燈:融資綜合(三項以 PCA 合一,每月只用過去資料重估權重,再排 PIT 百分位)＋外資流向＋台幣＋VIX,
-#    4 燈中 ≥3 顆 ≥75 → 停買。門檻凍結,前瞻檢驗至少 3–6 個月再檢討。
+#    2026-10 三燈:融資綜合(三項以 PCA 合一,每月只用過去資料重估權重,再排 PIT 百分位)＋外資流向＋台幣,
+#    三燈全亮(皆 ≥75)→ 停買。VIX 移出停買燈號(壓力期從未亮過)。門檻凍結,前瞻檢驗後再檢討。
 MARGIN3=["margin_resid_z","margin_yoy_div","margin_roc"]
-STOP4=["margin_combo","foreign_flow","fx_pressure","vix_level"]
+STOP4=["margin_combo","foreign_flow","fx_pressure"]   # 2026-10:拿掉 VIX,三燈全亮才停買
 STOP_N=3
+CAUTION=dict(k="margin_combo",v=70)   # 黃燈:亮兩燈且融資綜合 ≥70(未達停買,但需謹慎)
 TRIGGER={"vix_spike"}                   # 另有「跌破年線」由 trend_health 值判定
 MOMO={"trend_health","us_sox","kr_bubble"}
 GROUP={**{k:"內部槓桿" for k in ("margin_resid_z","margin_yoy_div","margin_roc")},
-       **{k:"外部資金情緒" for k in ("vix_level","foreign_flow","fx_pressure")},
+       **{k:"外部資金情緒" for k in ("foreign_flow","fx_pressure")},
+       "vix_level":"觸發層",
        **{k:"觸發層" for k in TRIGGER},
        **{k:"動能參考" for k in MOMO}}
 TRIG_PCT=85                             # VIX跳升危險度達此百分位即視為觸發
@@ -318,6 +320,7 @@ def build_app_data(d, R):
                 ma60br=ma60br, r20=r20,
                 slow=[k for k in STOP4 if k in inds] if all(k in inds for k in STOP4) else [k for k in ORDER if k in inds and k in SLOW],
                 stopn=STOP_N if all(k in inds for k in STOP4) else 5,
+                caution=CAUTION if CAUTION["k"] in inds else None,
                 momo=[k for k in ORDER if k in inds and k in MOMO])
 
 def build_html(app, comp_now, asof):
@@ -403,26 +406,26 @@ details.note summary::-webkit-details-marker{color:var(--muted)}
   <div id="scsuit" style="font-size:12.5px;margin-top:8px;padding:8px 11px;background:var(--bg);border:1px solid var(--border);border-radius:9px"></div>
   <div id="sc" style="position:relative"><svg id="scsvg"></svg><div id="sctip"></div></div>
   <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:2px"><span id="scstart"></span><span>背景=停買日 · 紅虛線▼=本檔出場線</span><span id="scend"></span></div></div></div>
-<div class="trend"><div class="th"><span>脆弱度歷史趨勢 <span style="font-weight:400;color:var(--muted)">(參考;停買只看四燈)</span></span>
+<div class="trend"><div class="th"><span>脆弱度歷史趨勢 <span style="font-weight:400;color:var(--muted)">(參考;停買只看三燈)</span></span>
  <span class="ctrl" id="ranges"><button data-d="244">1年</button><button data-d="732">3年</button><button data-d="1220">5年</button><button data-d="0">全部</button>
  <input type="date" id="d0"><span style="color:var(--muted)">~</span><input type="date" id="d1"></span></div>
  <div id="tc"><svg id="tcsvg"></svg><div id="tctip"></div></div>
  <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px;margin-top:4px">
- <span></span><span>紅底=停買日(四燈 ≥3) · 灰=NBER衰退</span></div></div>
+ <span></span><span>紅底=停買日(三燈全亮) · 灰=NBER衰退</span></div></div>
 <div class="gtitle" style="color:var(--series-1)">■ 停買燈號 ① 融資 <span style="font-weight:400;color:var(--muted)">三個分項收在卡片內,需要細看再點開</span></div>
 <div class="grid" id="grp-internal"></div>
-<div class="gtitle" style="color:var(--series-1)">■ 停買燈號 ②–④ 外資・台幣・VIX <span style="font-weight:400;color:var(--muted)">四燈中 ≥3 顆 ≥75 → 停買</span></div>
+<div class="gtitle" style="color:var(--series-1)">■ 停買燈號 ②–③ 外資・台幣 <span style="font-weight:400;color:var(--muted)">三燈全亮(皆 ≥75)→ 停買</span></div>
 <div class="grid" id="grp-external"></div>
-<div class="gtitle" style="color:var(--red)">■ 參考 · 短線觸發 <span style="font-weight:400;color:var(--muted)">不影響停買</span></div>
+<div class="gtitle" style="color:var(--red)">■ 參考 · VIX 與短線觸發 <span style="font-weight:400;color:var(--muted)">不影響停買</span></div>
 <div class="grid" id="grp-trigger"></div>
 <div class="gtitle" style="color:var(--muted)">■ 參考 · 動能 <span style="font-weight:400;color:var(--muted)">不影響停買(乖離越大→後續回撤反而越淺)</span></div>
 <div class="grid" id="grp-momo"></div>
 <details class="note"><summary style="cursor:pointer;font-weight:650;color:var(--tp)">方法論(點開)</summary><div style="margin-top:8px">
-<b>停買規則</b>:前一交易日收盤,四個停買燈號中有 ≥3 燈危險度 ≥75 → 下一交易日不新買進;賣出、停損照常。<br>
-<b>危險度</b>:各指標以 PIT 擴張百分位計算(第 t 日只與當日及以前的歷史比較,滿一年才起算),0–100,越高越危險;VIX 與外資流向反向計分(越低越危險)。<br>
-<b>四個停買燈號</b>:① 融資綜合:融資超額水位(去趨勢殘差)、融資成長 vs 名目 GDP 背離、融資半年擴張,三項高度相關,以 PCA 合一(每月只用過去資料重估權重),再算危險度;② 外資 20 日淨流向;③ 台幣 20 日變動;④ VIX 水準。<br>
-<b>參考指標(不影響停買)</b>:脆弱度合成分數、VIX 5 日跳升、指數距年線、費半與韓股乖離。<br>
-<b>驗證</b>:門檻 75 與 ≥3 燈事前固定,未以交易資料調整。以實際交易檢驗,停買日隔日的買進 106 筆勝率 7%,其他買進 1,424 筆勝率 50%(排列檢定 p≈0.001);2017 年起停買日後 20 日櫃買指數跌 ≥7% 的機率 15%,其他日 7%。<br>
+<b>停買規則</b>:前一交易日收盤,三個停買燈號(融資綜合、外資流向、台幣)全部危險度 ≥75 → 下一交易日不新買進;賣出、停損照常。<b style="color:var(--warn)">黃燈</b>:亮兩燈且融資綜合危險度 ≥70 → 照常停損/賣出,買進需特別謹慎(提示用,不在回測規則內)。<br>
+<b>危險度</b>:各指標以 PIT 擴張百分位計算(第 t 日只與當日及以前的歷史比較,滿一年才起算),0–100,越高越危險;外資流向反向計分(賣超越多越危險)。亮燈 = 達到自身歷史第 75 百分位以上。<br>
+<b>三個停買燈號</b>:① 融資綜合:融資超額水位(去趨勢殘差)、融資成長 vs 名目 GDP 背離、融資半年擴張,三項高度相關,以 PCA 合一(每月只用過去資料重估權重),再算危險度;② 外資 20 日淨流向;③ 台幣 20 日變動。三者同時亮 = 槓桿堆高時外資賣股並換匯撤出。<br>
+<b>參考指標(不影響停買)</b>:VIX 水準與 5 日跳升、脆弱度合成分數、指數距年線、費半與韓股乖離。VIX 原為第四燈,但在壓力期從未亮過、單獨分辨力弱,2026-10 移出;擋下的交易與四燈版完全相同。<br>
+<b>驗證</b>:門檻 75 事前固定,未以交易資料調整。以實際交易(券商分戶帳,2024/11 起)檢驗,停買日隔日的買進決策 56 個勝率 7%(未平倉部位以 2026/10/22 收盤計),其他 992 個勝率 48%(排列檢定 p≈0.001);2017 年起停買日後 20 日櫃買指數跌 ≥7% 的機率 34%,其他日 7%。<br>
 <b>限制</b>:停買日集中在 2026 年兩段壓力期,樣本小;本頁為風險控管工具,非投資建議。
 </div></details></div>
 </div>
@@ -461,21 +464,23 @@ const SENS=[
 ];
 let SI=1;                                   // 預設「標準」:回測覆蓋率與報酬皆優於原設定,回撤相同
 function trigAt(i){try{return SENS[SI].f(i)?1:0;}catch(e){return (D.trig&&D.trig[i])?1:0;}}
-function brakeState(i){return redCount(i)>=(D.stopn||5)?'brake':'ok';}
+function cautionAt(i){const c=D.caution;if(!c||!D.inds[c.k])return false;const m=D.inds[c.k].dng[i];return !stopAt(i)&&redCount(i)===(D.stopn||5)-1&&m!=null&&m>=c.v;}
+function brakeState(i){return redCount(i)>=(D.stopn||5)?'brake':(cautionAt(i)?'fragile':'ok');}
 function brakeStateOld(i){const c=D.comp[i],t=trigAt(i);
  if(t&&c>=75)return 'brake';        // 又脆弱又已觸發 → 真的降
  if(t)return 'trig';                // 已觸發但結構不脆弱 → 短線避險
  if(c>=75)return 'fragile';         // 脆弱但沒觸發 → 只是不加碼(不出場)
  return 'ok';}
 function stopAt(i){return redCount(i)>=(D.stopn||5);}
-function gauge(i){const rc=redCount(i),stop=stopAt(i);
+function gauge(i){const rc=redCount(i),stop=stopAt(i),cau=cautionAt(i);
  $('gauge').style.setProperty('--v',(rc/NSLOW*100).toFixed(0));
- $('gauge').style.setProperty('--gc',stop?'var(--red)':'var(--ok)');$('cnum').textContent=rc+'/'+NSLOW;
- $('cjudge').innerHTML=stop?'⛔ <b style="color:var(--red)">停買可賣</b> <span style="font-size:13px;color:var(--ts)">下一交易日不新買進,賣出、停損照常</span>'
+ $('gauge').style.setProperty('--gc',stop?'var(--red)':(cau?'var(--warn)':'var(--ok)'));$('cnum').textContent=rc+'/'+NSLOW;
+ $('cjudge').innerHTML=stop?'⛔ <b style="color:var(--red)">停買可賣</b> <span style="font-size:13px;color:var(--ts)">建議下一交易日不新買進，賣出/停損照常</span>'
+  :cau?'⚠️ <b style="color:var(--warn)">黃燈</b> <span style="font-size:13px;color:var(--ts)">照常停損/賣出，買進需特別謹慎（融資綜合 '+Math.round(D.inds[D.caution.k].dng[i])+'，接近亮燈）</span>'
   :'✅ <b style="color:var(--ok)">可買</b> <span style="font-size:13px;color:var(--ts)">照常交易</span>';
- const nm={margin_combo:'融資綜合',foreign_flow:'外資',fx_pressure:'台幣',vix_level:'VIX'};
- $('rednow').innerHTML=(D.dates[i]===D.dates[b]?'':D.dates[i]+' · ')+(D.slow||[]).map(k=>{const dg=D.inds[k].dng[i];const on=dg!=null&&dg>=75;
-   return '<span style="color:'+(on?'var(--red)':'var(--ok)')+'">'+(on?'●':'○')+' '+(nm[k]||D.inds[k].label)+' '+(dg==null?'–':Math.round(dg))+'</span>';}).join(' · ');}
+ const nm={margin_combo:'融資綜合',foreign_flow:'外資',fx_pressure:'台幣'};
+ $('rednow').innerHTML=(D.dates[i]===D.dates[b]?'':D.dates[i]+' · ')+(D.slow||[]).map(k=>{const dg=D.inds[k].dng[i];const on=dg!=null&&dg>=75;const w=!on&&cau&&D.caution&&k===D.caution.k;
+   return '<span style="color:'+(on?'var(--red)':(w?'var(--warn)':'var(--ok)'))+'">'+(on?'●':(w?'▲':'○'))+' '+(nm[k]||D.inds[k].label)+' '+(dg==null?'–':Math.round(dg))+(w?' 注意':'')+'</span>';}).join(' · ');}
 // ---- cards ----
 function cardHTML(k,extra){const c=D.inds[k];
  const tag=(D.slow||[]).includes(k)?' <span style="font-size:10.5px;color:var(--series-1);font-weight:600">● 計入停買</span>':'';
@@ -515,7 +520,7 @@ function renderTrend(){curA=a;curB=b;W=box.clientWidth||800;plotW=W-padL-padR;pl
   g+='<rect x="'+xs+'" y="'+padT+'" width="'+Math.max(2,xe-xs)+'" height="'+plotH+'" fill="var(--muted)" opacity="0.30"/>';
   g+='<text x="'+((xs+xe)/2)+'" y="'+(padT+10)+'" font-size="9" fill="var(--ts)" text-anchor="middle">NBER衰退</text>';});
  // 同時進紅區項數光譜(6→10, 色深遞增)
- // 背景 = 停買日(四燈 ≥3)
+ // 背景 = 停買日(三燈全亮,紅);黃燈日(亮兩燈且融資綜合 ≥70,橙)
  const cw=plotW/Math.max(1,curB-curA);
  for(let i=curA;i<=curB;i++){const st=brakeState(i);if(st==='ok')continue;
    const col=(st==='fragile')?'var(--warn)':'var(--red)';
@@ -550,7 +555,7 @@ function showAt(i){sel=i;const x=X(i),y=Y(D.comp[i]);
  $('tcx').setAttribute('x1',x);$('tcx').setAttribute('x2',x);$('tcx').setAttribute('opacity',pinned?'0.6':'0.35');
  $('tcd').setAttribute('cx',x);$('tcd').setAttribute('cy',y);$('tcd').setAttribute('opacity','1');
  const rc=redCount(i);tip.style.opacity='1';
- tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>亮紅 '+rc+'/'+NSLOW+(brakeState(i)==='brake'?' ⛔停買可賣':'');
+ tip.innerHTML=(pinned?'📌 ':'')+'<b>'+D.dates[i]+'</b><br>脆弱度 '+D.comp[i]+'<br>亮紅 '+rc+'/'+NSLOW+(brakeState(i)==='brake'?' ⛔停買可賣':(brakeState(i)==='fragile'?' ⚠️黃燈':''));
  let tx=x+12;if(tx>W-104)tx=x-104;tip.style.left=Math.max(0,tx)+'px';tip.style.top='4px';
  $('viewdate').textContent=pinned?'📌 已固定(點兩下取消)':'';
  gauge(i);renderCards(i);
@@ -856,7 +861,7 @@ function updateSuit(){const el=$('scsuit');if(!el||!SD)return;
  if(avg>=70||pb>=15){v='不宜融資持有(系統高壓)';col='var(--red)';}
  else if(avg>=55||pb>=5){v='融資需謹慎';col='var(--warn)';}
  else{v='系統壓力低,相對適合';col='var(--ok)';}
- let h='此區間停買日 <b>'+pb.toFixed(0)+'%</b>(四燈 ≥3)';
+ let h='此區間停買日 <b>'+pb.toFixed(0)+'%</b>(三燈全亮)';
  const s=SD.exstats;
  if(s&&s.trades>0){
   h+='<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">'

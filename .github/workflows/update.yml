@@ -1,18 +1,18 @@
 # 自動更新 + 部署 GitHub Pages
 #
-#   每個交易日 台灣 07:50  台股脆弱度 / 美股脆弱度 / 產業熱度雷達
+#   每個交易日 台灣 05:57  台股脆弱度 / 美股脆弱度 / 產業熱度雷達
 #   每週六     台灣 10:17  產業題材報酬 industry_returns.json(並重建台股頁嵌入)
 #   每月 1 日  台灣 11:23  資產定價實驗室(2145 檔,最重,分多次續抓)
 #   push 到 main         只重新部署(不抓資料)
 #   手動 Run workflow     可選範圍
 #
-# GitHub cron 一律 UTC:台灣 = UTC+8,所以台灣週一~五 07:50 = UTC 週日~四 23:50。
+# GitHub cron 一律 UTC:台灣 = UTC+8,所以台灣週一~五 05:57 = UTC 週日~四 21:57。
 # 注意:用 GITHUB_TOKEN 推送的 commit 不會再觸發其他 workflow,所以這裡自己完成部署。
 name: update-and-deploy
 
 on:
   schedule:
-    - cron: "50 23 * * 0-4"   # daily
+    - cron: "57 21 * * 0-4"   # daily
     - cron: "17 2 * * 6"      # weekly
   push:
     branches: ["main"]
@@ -105,7 +105,7 @@ jobs:
           BLS_CONTACT: ${{ vars.BLS_CONTACT || secrets.SMTP_USER }}
         run: python macro_calendar.py
 
-      # ---------- 警報信:停買燈號(台股四燈 ≥3;美股六燈 ≥4)----------
+      # ---------- 警報信:停買燈號(台股三燈全亮)+ 每日燈號日報(REPORT_TO)----------
       - name: Fragility alert email
         if: steps.scope.outputs.daily == 'true' || steps.scope.outputs.weekly == 'true' || inputs.force_alert
         continue-on-error: true
@@ -113,6 +113,7 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           ALERT_TO: ${{ vars.ALERT_TO || 's12332167890@gmail.com' }}
+          REPORT_TO: ${{ vars.REPORT_TO }}
           SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
           FORCE: ${{ inputs.force_alert && '1' || '0' }}
         run: python alert.py
